@@ -1,0 +1,115 @@
+---
+# site.yml - Meridian Retail branch network, Production-Grade IaC with Ansible
+#
+# This is the one playbook this whole course builds, one stage at a time.
+# Every later TODO adds to what's already here - nothing you write in an
+# earlier TODO gets thrown away or rewritten later.
+
+- name: Meridian Retail branch network service
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    # =========================================================================
+    # TODO 02 - Load the Declarative Service Intent (already solved)
+    # =========================================================================
+
+    - name: load the declarative service intent
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/intent/retail_branch_service.yml"
+        name: service_intent
+
+    # =========================================================================
+    # END TODO 02
+    # =========================================================================
+
+
+    # =========================================================================
+    # TODO 03 - Run Pre-Flight Validation (already solved)
+    # =========================================================================
+
+    - name: pre-flight validation
+      ansible.builtin.assert:
+        that:
+          - disabled_roles | difference(service_intent.vlans | map(attribute='role') | list) | length == 0
+        fail_msg: "Pre-flight validation failed for {{ inventory_hostname }}."
+        success_msg: "Pre-flight validation passed for {{ inventory_hostname }}."
+      register: preflight_result
+
+    # =========================================================================
+    # END TODO 03
+    # =========================================================================
+
+    - name: report what was loaded for this device
+      ansible.builtin.debug:
+        msg:
+          - "Loaded service: {{ service_intent.service }}"
+          - "Loaded tenant: {{ service_intent.tenant }}"
+          - "Loaded environment: {{ environment_name }}"
+          - "Loaded device: {{ device_id }} ({{ platform }}, {{ site_id }})"
+          - "Loaded resolved_vlans: {{ resolved_vlans | map(attribute='id') | list }}"
+          - "Pre-flight validation passed."
+
+    # =========================================================================
+    # TODO 04 - Build Environment- and Site-Aware Render Facts
+    # =========================================================================
+    #
+    # Goal:
+    #   Everything this device needs to render its own config already
+    #   exists, but it's scattered across separate variables:
+    #     - service_intent.tenant / service_intent.service (TODO 02)
+    #     - hostname, platform, site_id, environment_name (dynamic
+    #       inventory - see inventory/devices.py)
+    #     - resolved_vlans (also the dynamic inventory - already filtered
+    #       for this exact device's environment and site, already sorted)
+    #
+    #   TODO 05's render step needs ONE clean fact to hand to the Jinja
+    #   template - not three different variables it has to know how to
+    #   find and combine itself. That one fact is what this TODO builds.
+    #
+    #   This mirrors the Python course's RenderContext object - the
+    #   difference is that here, the actual VLAN filtering/sorting work
+    #   (the hard part) already happened once, in the dynamic inventory,
+    #   for every device. This TODO is the assembly step: gather what
+    #   already exists into the one shape the renderer expects.
+    #
+    # Use set_fact to build a variable named render_context with exactly
+    # these keys:
+    #   site_id            - this device's site_id
+    #   environment_name   - this device's environment_name
+    #   tenant             - service_intent.tenant
+    #   service            - service_intent.service
+    #   hostname           - this device's hostname
+    #   platform           - this device's platform
+    #   vlans              - this device's resolved_vlans
+    #
+    # =========================================================================
+    # STUDENT WORK AREA - TODO 04
+    # =========================================================================
+             
+
+
+    # =========================================================================
+    # END STUDENT WORK AREA - TODO 04
+    # =========================================================================
+
+    # This guard is provided for you, same as the debug task below it - it's
+    # not part of what you write. Without it, an unsolved TODO 04 wouldn't
+    # fail here in any clean, readable way: the "report the render context"
+    # task below would instead crash on "'render_context' is undefined"
+    # with a long, unfriendly Ansible parse-error dump. ansible.builtin.assert
+    # genuinely fails this host instead: real failed=1 in the recap, real
+    # non-zero exit code - this IS incomplete, and the run says so
+    # honestly, batched under one "TASK [...]" banner for all 9 devices
+    # instead of a separate crash dump per host.
+    - name: confirm render context was built
+      ansible.builtin.assert:
+        that:
+          - render_context is defined
+        fail_msg: "TODO 04 not complete: render_context was not built. See STUDENT WORK AREA - TODO 04 in site.yml."
+
+    - name: report the render context for this device
+      ansible.builtin.debug:
+        msg:
+          - "Render context hostname: {{ render_context.hostname }}"
+          - "Render context vlans: {{ render_context.vlans | map(attribute='id') | list }}"

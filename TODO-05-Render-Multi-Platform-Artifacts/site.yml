@@ -1,0 +1,146 @@
+---
+# site.yml - Meridian Retail branch network, Production-Grade IaC with Ansible
+#
+# This is the one playbook this whole course builds, one stage at a time.
+# Every later TODO adds to what's already here - nothing you write in an
+# earlier TODO gets thrown away or rewritten later.
+
+- name: Meridian Retail branch network service
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    # =========================================================================
+    # TODO 02 - Load the Declarative Service Intent (already solved)
+    # =========================================================================
+
+    - name: load the declarative service intent
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/intent/retail_branch_service.yml"
+        name: service_intent
+
+    # =========================================================================
+    # END TODO 02
+    # =========================================================================
+
+
+    # =========================================================================
+    # TODO 03 - Run Pre-Flight Validation (already solved)
+    # =========================================================================
+
+    - name: pre-flight validation
+      ansible.builtin.assert:
+        that:
+          - disabled_roles | difference(service_intent.vlans | map(attribute='role') | list) | length == 0
+        fail_msg: "Pre-flight validation failed for {{ inventory_hostname }}."
+        success_msg: "Pre-flight validation passed for {{ inventory_hostname }}."
+      register: preflight_result
+
+    # =========================================================================
+    # END TODO 03
+    # =========================================================================
+
+    - name: report what was loaded for this device
+      ansible.builtin.debug:
+        msg:
+          - "Loaded service: {{ service_intent.service }}"
+          - "Loaded tenant: {{ service_intent.tenant }}"
+          - "Loaded environment: {{ environment_name }}"
+          - "Loaded device: {{ device_id }} ({{ platform }}, {{ site_id }})"
+          - "Loaded resolved_vlans: {{ resolved_vlans | map(attribute='id') | list }}"
+          - "Pre-flight validation passed."
+
+    # =========================================================================
+    # TODO 04 - Build Environment- and Site-Aware Render Facts (already solved)
+    # =========================================================================
+
+    - name: build render context
+      ansible.builtin.set_fact:
+        render_context:
+          site_id: "{{ site_id }}"
+          environment_name: "{{ environment_name }}"
+          tenant: "{{ service_intent.tenant }}"
+          service: "{{ service_intent.service }}"
+          hostname: "{{ hostname }}"
+          platform: "{{ platform }}"
+          vlans: "{{ resolved_vlans }}"
+
+    # =========================================================================
+    # END TODO 04
+    # =========================================================================
+
+    - name: report the render context for this device
+      ansible.builtin.debug:
+        msg:
+          - "Render context hostname: {{ render_context.hostname }}"
+          - "Render context vlans: {{ render_context.vlans | map(attribute='id') | list }}"
+
+    # =========================================================================
+    # TODO 05 - Render Multi-Platform Artifacts
+    # =========================================================================
+    #
+    # Goal:
+    #   render_context (TODO 04) has everything this device's config needs,
+    #   but ansible.builtin.template doesn't take a context object the way
+    #   Python's Jinja2 does (template.render(**render_context)). It renders
+    #   using whatever variables are already in scope, under the exact
+    #   names the .j2 file references - and templates/cat8k_ospf.j2 and
+    #   templates/nexus_vlan.j2 both expect plain "hostname" and "vlans",
+    #   not "render_context.hostname" / "render_context.vlans".
+    #
+    #   This TODO is the render step: pick the right template file for
+    #   this device's platform, expose render_context's fields under the
+    #   names those templates expect (a task's own vars: block), and write
+    #   the result to output/<device_id>.cfg.
+    #
+    # Use ansible.builtin.template to:
+    #   1. Pick src based on render_context.platform:
+    #        cat8k    -> cat8k_ospf.j2
+    #        nexus9k  -> nexus_vlan.j2
+    #      (both already exist under templates/ - Ansible finds them there
+    #      automatically, no full path needed)
+    #   2. Set dest to "{{ playbook_dir }}/output/{{ device_id }}.cfg"
+    #   3. Under this task's own vars:, expose:
+    #        hostname: render_context.hostname
+    #        vlans:    render_context.vlans
+    #      so the template's {{ hostname }} and {{ vlans }} resolve to the
+    #      right thing for this specific device.
+    #
+    # =========================================================================
+    # STUDENT WORK AREA - TODO 05
+    # =========================================================================
+                    
+
+
+    # =========================================================================
+    # END STUDENT WORK AREA - TODO 05
+    # =========================================================================
+
+    # These two guard tasks are provided for you, same as the debug task
+    # below them - they're not part of what you write. Without them, an
+    # unsolved TODO 05 wouldn't fail here with a clean message: the
+    # "report the rendered artifact" task below would instead crash with
+    # a raw "file lookup ... file not found" error naming a full
+    # filesystem path, not a message that says what's actually
+    # incomplete. ansible.builtin.stat lets a guard check whether a file
+    # exists without throwing the way lookup('file', ...) does, so
+    # ansible.builtin.assert can genuinely fail this host with a clean
+    # message instead: real failed=1 in the recap, real non-zero exit
+    # code - this IS incomplete, and the run says so honestly, batched
+    # under one "TASK [...]" banner for all 9 devices.
+    - name: check whether the platform-specific configuration was rendered
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/output/{{ device_id }}.cfg"
+      register: rendered_artifact_stat
+
+    - name: confirm the platform-specific configuration was rendered
+      ansible.builtin.assert:
+        that:
+          - rendered_artifact_stat.stat.exists
+        fail_msg: "TODO 05 not complete: output/{{ device_id }}.cfg was not rendered. See STUDENT WORK AREA - TODO 05 in site.yml."
+
+    - name: report the rendered artifact for this device
+      ansible.builtin.debug:
+        msg:
+          - "Rendered artifact: output/{{ device_id }}.cfg"
+          - "Rendered artifact first line: {{ (lookup('file', playbook_dir + '/output/' + device_id + '.cfg')).splitlines()[0] }}"

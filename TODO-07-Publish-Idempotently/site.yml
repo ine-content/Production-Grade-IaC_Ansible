@@ -1,0 +1,203 @@
+---
+# site.yml - Meridian Retail branch network, Production-Grade IaC with Ansible
+#
+# This is the one playbook this whole course builds, one stage at a time.
+# Every later TODO adds to what's already here - nothing you write in an
+# earlier TODO gets thrown away or rewritten later.
+
+- name: Meridian Retail branch network service
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    # =========================================================================
+    # TODO 02 - Load the Declarative Service Intent (already solved)
+    # =========================================================================
+
+    - name: load the declarative service intent
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/intent/retail_branch_service.yml"
+        name: service_intent
+
+    # =========================================================================
+    # END TODO 02
+    # =========================================================================
+
+
+    # =========================================================================
+    # TODO 03 - Run Pre-Flight Validation (already solved)
+    # =========================================================================
+
+    - name: pre-flight validation
+      ansible.builtin.assert:
+        that:
+          - disabled_roles | difference(service_intent.vlans | map(attribute='role') | list) | length == 0
+        fail_msg: "Pre-flight validation failed for {{ inventory_hostname }}."
+        success_msg: "Pre-flight validation passed for {{ inventory_hostname }}."
+      register: preflight_result
+
+    # =========================================================================
+    # END TODO 03
+    # =========================================================================
+
+    - name: report what was loaded for this device
+      ansible.builtin.debug:
+        msg:
+          - "Loaded service: {{ service_intent.service }}"
+          - "Loaded tenant: {{ service_intent.tenant }}"
+          - "Loaded environment: {{ environment_name }}"
+          - "Loaded device: {{ device_id }} ({{ platform }}, {{ site_id }})"
+          - "Loaded resolved_vlans: {{ resolved_vlans | map(attribute='id') | list }}"
+          - "Pre-flight validation passed."
+
+    # =========================================================================
+    # TODO 04 - Build Environment- and Site-Aware Render Facts (already solved)
+    # =========================================================================
+
+    - name: build render context
+      ansible.builtin.set_fact:
+        render_context:
+          site_id: "{{ site_id }}"
+          environment_name: "{{ environment_name }}"
+          tenant: "{{ service_intent.tenant }}"
+          service: "{{ service_intent.service }}"
+          hostname: "{{ hostname }}"
+          platform: "{{ platform }}"
+          vlans: "{{ resolved_vlans }}"
+
+    # =========================================================================
+    # END TODO 04
+    # =========================================================================
+
+    - name: report the render context for this device
+      ansible.builtin.debug:
+        msg:
+          - "Render context hostname: {{ render_context.hostname }}"
+          - "Render context vlans: {{ render_context.vlans | map(attribute='id') | list }}"
+
+    # =========================================================================
+    # TODO 05 - Render Multi-Platform Artifacts (already solved)
+    # =========================================================================
+
+    - name: render the platform-specific configuration
+      ansible.builtin.template:
+        src: "{{ platform_templates[render_context.platform] }}"
+        dest: "{{ playbook_dir }}/output/{{ device_id }}.cfg"
+      vars:
+        platform_templates:
+          cat8k: cat8k_ospf.j2
+          nexus9k: nexus_vlan.j2
+        hostname: "{{ render_context.hostname }}"
+        vlans: "{{ render_context.vlans }}"
+
+    # =========================================================================
+    # END TODO 05
+    # =========================================================================
+
+    - name: report the rendered artifact for this device
+      ansible.builtin.debug:
+        msg:
+          - "Rendered artifact: output/{{ device_id }}.cfg"
+          - "Rendered artifact first line: {{ (lookup('file', playbook_dir + '/output/' + device_id + '.cfg')).splitlines()[0] }}"
+
+    # =========================================================================
+    # TODO 06 - Run Post-Render Correctness Verification (already solved)
+    # =========================================================================
+
+    - name: verify rendered artifact against golden reference
+      ansible.builtin.assert:
+        that:
+          - lookup('file', playbook_dir + '/output/' + device_id + '.cfg')
+            == lookup('file', playbook_dir + '/golden/' + site_id + '/' + device_id + '.cfg')
+        fail_msg: "Rendered artifact for {{ device_id }} does not match golden/{{ site_id }}/{{ device_id }}.cfg."
+
+    - name: independently verify no disabled vlan leaked into the rendered output
+      ansible.builtin.assert:
+        that:
+          - disabled_vlan_markers
+            | select('in', lookup('file', playbook_dir + '/output/' + device_id + '.cfg'))
+            | list | length == 0
+        fail_msg: "A disabled VLAN marker leaked into output/{{ device_id }}.cfg."
+      register: policy_check_result
+
+    # =========================================================================
+    # END TODO 06
+    # =========================================================================
+
+    - name: report post-render correctness verification for this device
+      ansible.builtin.debug:
+        msg:
+          - "output/{{ device_id }}.cfg matches golden/{{ site_id }}/{{ device_id }}.cfg"
+          - "No disabled VLAN markers leaked into the rendered output."
+          - "Post-render correctness verification passed."
+
+    # =========================================================================
+    # TODO 07 - Publish Idempotently
+    # =========================================================================
+    #
+    # Goal:
+    #   Now that every artifact has been independently verified twice
+    #   (TODO 06), it's safe to actually publish it. But a pipeline that
+    #   rewrites every device's config file on every single run, whether
+    #   or not anything actually changed, makes it impossible to ever tell
+    #   a real change from noise. "We run this on a schedule - if it
+    #   rewrites every file every time, we can't trust file timestamps, we
+    #   can't tell a real change from noise, and every run looks like a
+    #   full redeploy. We need it to only touch a file when something
+    #   actually changed."
+    #
+    #   Python has to solve this by hand: hash the new content, compare it
+    #   against a hash saved from the last run, and only write to disk if
+    #   they differ. ansible.builtin.template already does exactly that
+    #   comparison internally, every time it runs, for free - it checksums
+    #   the content it's about to write against whatever's already at
+    #   dest, and only touches the file (and only reports changed: true)
+    #   if they're actually different. TODO 05's render task has already
+    #   been idempotent this whole time without you doing anything extra
+    #   for it.
+    #
+    #   This TODO makes that guarantee visible and proven, not just
+    #   assumed: re-run the exact same render immediately after it, and
+    #   confirm Ansible itself reports no change the second time.
+    #
+    # Use ansible.builtin.template (identical to TODO 05's own task) and
+    # ansible.builtin.assert to:
+    #   1. Render this device's config again, to the same dest, with the
+    #      same vars: - nothing here should look any different from
+    #      TODO 05's task.
+    #   2. register: the result under its own descriptive name - e.g.
+    #      republish_result. TODO 05's own render task doesn't register
+    #      anything at all, so there's no name it could collide with; the
+    #      point is just to name this result for what it actually proves.
+    #   3. assert that republish_result.changed is false - the file was
+    #      already correct, so writing "the same thing" again should be a
+    #      no-op, not a rewrite.
+    #
+    # =========================================================================
+    # STUDENT WORK AREA - TODO 07
+    # =========================================================================
+
+
+
+    # =========================================================================
+    # END STUDENT WORK AREA - TODO 07
+    # =========================================================================
+
+    # This guard is provided for you, same as the debug task below it - it's
+    # not part of what you write. It confirms your re-render task above
+    # actually ran (register: republish_result is only set once that task
+    # executes) - without it, a blank TODO 07 would fall straight through
+    # to the report task below and print a success message even though
+    # nothing was ever re-rendered or checked. If your assert task ran and
+    # failed, this guard never even gets reached - Ansible already stopped
+    # this host at your own fail_msg.
+    - name: confirm idempotent publish was verified
+      ansible.builtin.assert:
+        that:
+          - republish_result is defined
+        fail_msg: "TODO 07 not complete: idempotent publish was not verified. See STUDENT WORK AREA - TODO 07 in site.yml."
+
+    - name: report idempotent publish result for this device
+      ansible.builtin.debug:
+        msg:
+          - "output/{{ device_id }}.cfg was already correct - publishing made no changes."

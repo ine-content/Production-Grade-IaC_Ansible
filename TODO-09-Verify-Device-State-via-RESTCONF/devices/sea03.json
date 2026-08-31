@@ -1,0 +1,4 @@
+[
+  { "device_id": "sea03-cat8k-01", "site_id": "sea03", "platform": "cat8k",   "hostname": "STG-SEA03-CAT8K-01", "ip_address": "127.50.31.10", "restconf_port": 8543 },
+  { "device_id": "sea03-n9k-01",   "site_id": "sea03", "platform": "nexus9k", "hostname": "STG-SEA03-N9K-01",   "ip_address": "127.50.31.20", "restconf_port": 8543 }
+]

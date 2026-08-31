@@ -1,0 +1,96 @@
+---
+# site.yml - Meridian Retail branch network, Production-Grade IaC with Ansible
+#
+# This is the one playbook this whole course builds, one stage at a time.
+# Every later TODO adds to what's already here - nothing you write in an
+# earlier TODO gets thrown away or rewritten later.
+
+- name: Meridian Retail branch network service
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    # =========================================================================
+    # TODO 02 - Load the Declarative Service Intent
+    # =========================================================================
+    #
+    # Goal:
+    #   Notice what's already true, before this task even runs, and before
+    #   you write a single line:
+    #
+    #     - inventory/devices.py (a dynamic inventory script) already read
+    #       every devices/*.json + sites/*.json file and turned it into
+    #       per-host variables. Run `ansible-inventory -i inventory/devices.py
+    #       --list` yourself and look - device_id, site_id, platform,
+    #       hostname, restconf_port, restconf_path, region, environment,
+    #       and resolved_vlans are already sitting on every host, with zero
+    #       code from you.
+    #
+    #     - group_vars/prod.yml and group_vars/staging.yml were ALSO already
+    #       merged in automatically. Ansible loads group_vars/<name>.yml for
+    #       every group named <name> - and the dynamic inventory puts every
+    #       device into a group named after its environment ("prod" or
+    #       "staging"). That's the whole mechanism. No loader, no parser,
+    #       no code path you had to write.
+    #
+    #   In the Python version of this course, TODO 02 was the biggest single
+    #   TODO in the whole capstone - a hand-written loader for six JSON
+    #   files, looping and keying dictionaries by hand. Here, that entire
+    #   TODO is already done, by the inventory system itself, before this
+    #   playbook starts.
+    #
+    #   The one thing that ISN'T automatic: intent/retail_branch_service.yml
+    #   (which you authored in TODO 01) is not a group_vars or host_vars
+    #   file, and its name doesn't match any group or host - so nothing
+    #   points Ansible at it on its own. You have to load it yourself.
+    #
+    # Load intent/retail_branch_service.yml into a variable named
+    # service_intent, using the include_vars module. include_vars merges
+    # the top-level keys of the file straight into your variable
+    # namespace by default - name this task's variable explicitly with
+    # the `name:` option so you get one clean service_intent variable
+    # (with .tenant, .service, and .vlans) instead of three separate loose
+    # variables (tenant, service, vlans).
+    #
+    # =========================================================================
+    # STUDENT WORK AREA - TODO 02
+    # =========================================================================
+
+
+
+
+    # =========================================================================
+    # END STUDENT WORK AREA - TODO 02
+    # =========================================================================
+
+    # This guard is provided for you, same as the debug task below it - it's
+    # not part of what you write. Without it, an unsolved TODO 02 wouldn't
+    # fail here at all in any recognizable way: the "report what was
+    # loaded" task below would instead crash on "'service_intent' is
+    # undefined" with a long, unfriendly Ansible parse-error dump.
+    # ansible.builtin.assert genuinely fails this host instead: real
+    # failed=1 in the recap, real non-zero exit code - this IS incomplete,
+    # and the run says so honestly, batched under one "TASK [...]" banner
+    # for all 9 devices instead of one banner per host. Depending on your
+    # Ansible version, you may also see an "[ERROR]: Task failed: Action
+    # failed" callout with file/line context above the normal
+    # "fatal: [host]: FAILED! => {...}" result - that's just newer
+    # ansible-core's own extra diagnostic context for any failed task
+    # (not specific to this module, and not a second, different problem),
+    # pointing at this exact task. This is the same thing python
+    # grading.py already tells you TODO 02 isn't done, just via
+    # ./run_playbook.sh directly instead.
+    - name: confirm the declarative service intent was loaded
+      ansible.builtin.assert:
+        that:
+          - service_intent is defined
+        fail_msg: "TODO 02 not complete: service_intent was not loaded. See STUDENT WORK AREA - TODO 02 in site.yml."
+
+    - name: report what was loaded for this device
+      ansible.builtin.debug:
+        msg:
+          - "Loaded service: {{ service_intent.service }}"
+          - "Loaded tenant: {{ service_intent.tenant }}"
+          - "Loaded environment: {{ environment_name }}"
+          - "Loaded device: {{ device_id }} ({{ platform }}, {{ site_id }})"
+          - "Loaded resolved_vlans: {{ resolved_vlans | map(attribute='id') | list }}"

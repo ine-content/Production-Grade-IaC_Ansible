@@ -1,0 +1,14 @@
+# group_vars/staging.yml - policy for the "staging" environment
+#
+# Same no-credentials-in-git rule as prod.yml - see that file's comment.
+# auto_deploy: true is what makes staging devices safe to push to
+# automatically, without a human approval gate; prod devices never get
+# that flag.
+#
+# Named environment_name, not environment - see prod.yml's comment for why.
+
+environment_name: staging
+description: "Staging - new site onboarding. Guest wifi is not yet approved for staging sites."
+disabled_roles:
+  - guest
+auto_deploy: true

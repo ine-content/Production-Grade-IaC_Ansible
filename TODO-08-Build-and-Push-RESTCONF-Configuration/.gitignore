@@ -1,0 +1,23 @@
+# Real RESTCONF credentials for local runs - never commit this.
+# Copy .env.example to .env and fill in real values instead.
+.env
+
+__pycache__/
+*.pyc
+*.retry
+
+# The mock device fleet's persisted "device memory" (see
+# mock_device_server.py) - local runtime state, not source.
+mock_device_state.json
+mock_attempt_counts.json
+mock_fault_injection.json
+
+# Rendered/pushed artifacts and run logs are local outputs, not source.
+output/*.cfg
+logs/*.log
+
+# Ansible's own local artifacts - never source either.
+*.retry
+.ansible/
+
+.DS_Store

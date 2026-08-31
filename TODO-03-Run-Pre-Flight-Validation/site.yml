@@ -1,0 +1,99 @@
+---
+# site.yml - Meridian Retail branch network, Production-Grade IaC with Ansible
+#
+# This is the one playbook this whole course builds, one stage at a time.
+# Every later TODO adds to what's already here - nothing you write in an
+# earlier TODO gets thrown away or rewritten later.
+
+- name: Meridian Retail branch network service
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    # =========================================================================
+    # TODO 02 - Load the Declarative Service Intent (already solved)
+    # =========================================================================
+
+    - name: load the declarative service intent
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/intent/retail_branch_service.yml"
+        name: service_intent
+
+    # =========================================================================
+    # END TODO 02
+    # =========================================================================
+
+    - name: report what was loaded for this device
+      ansible.builtin.debug:
+        msg:
+          - "Loaded service: {{ service_intent.service }}"
+          - "Loaded tenant: {{ service_intent.tenant }}"
+          - "Loaded environment: {{ environment_name }}"
+          - "Loaded device: {{ device_id }} ({{ platform }}, {{ site_id }})"
+          - "Loaded resolved_vlans: {{ resolved_vlans | map(attribute='id') | list }}"
+
+    # =========================================================================
+    # TODO 03 - Run Pre-Flight Validation
+    # =========================================================================
+    #
+    # Goal:
+    #   Nothing above has been checked yet - TODO 02 only loaded data, it
+    #   never confirmed any of it makes sense. A file can be perfectly
+    #   well-formed YAML and still be wrong. This TODO adds that check,
+    #   using assert - Ansible's built-in module for "this must be true,
+    #   or stop right here."
+    #
+    #   Network Engineering has said: "We've had an environment file
+    #   disable a VLAN role that didn't even exist - a typo, 'gust'
+    #   instead of 'guest'. It didn't do anything, silently, and nobody
+    #   noticed until a site that should have had guest wifi didn't. We
+    #   want every cross-file reference checked before the pipeline
+    #   renders or pushes anything."
+    #
+    # Write ONE assert task whose `that:` condition fails unless every
+    # role in disabled_roles (this device's own environment policy,
+    # already merged in automatically from group_vars) is also a real
+    # role somewhere in service_intent.vlans - the referential-integrity
+    # check that catches exactly the "gust" vs "guest" typo above.
+    #
+    # Give the assert task a `fail_msg:` and `success_msg:` - a failed
+    # assert with no message just says "Assertion failed", which won't
+    # tell you which device or role broke. Also give it
+    # `register: preflight_result` - the guard task right after STUDENT
+    # WORK AREA (already provided, not yours to write) checks for that
+    # variable to confirm this task actually ran at all, the same way
+    # TODO 02's guard checked for service_intent.
+    #
+    # Hint: Jinja's `difference` filter returns items in the first list
+    # that are NOT in the second -
+    #   disabled_roles | difference(<all valid roles>) | length == 0
+    # means every disabled role was found among the valid ones.
+    #
+    # =========================================================================
+    # STUDENT WORK AREA - TODO 03
+    # =========================================================================
+                                                                          
+
+
+    # =========================================================================
+    # END STUDENT WORK AREA - TODO 03
+    # =========================================================================
+
+    # This guard is provided for you, same as the debug task below it - it's
+    # not part of what you write. It confirms your assert task above
+    # actually ran (register: preflight_result is only set once that task
+    # executes) - without it, a blank TODO 03 would fall straight through
+    # to the report task below and print "Pre-flight validation passed."
+    # even though nothing was ever checked. If your assert task ran and
+    # failed, this guard never even gets reached - Ansible already stopped
+    # this host at your own fail_msg.
+    - name: confirm pre-flight validation was run
+      ansible.builtin.assert:
+        that:
+          - preflight_result is defined
+        fail_msg: "TODO 03 not complete: pre-flight validation was not run. See STUDENT WORK AREA - TODO 03 in site.yml."
+
+    - name: report pre-flight validation for this device
+      ansible.builtin.debug:
+        msg:
+          - "Pre-flight validation passed."

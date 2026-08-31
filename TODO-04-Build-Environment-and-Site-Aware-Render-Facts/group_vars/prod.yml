@@ -1,0 +1,22 @@
+# group_vars/prod.yml - policy for the "prod" environment
+#
+# No RESTCONF credentials live here, on purpose - see intent/README further
+# down the course for why. Credentials are resolved at runtime from OS
+# environment variables (RESTCONF_PROD_USERNAME / RESTCONF_PROD_PASSWORD),
+# the same pattern CI-CD_Pipeline_with_Git used.
+#
+# This file applies to every host in the "prod" inventory group - which
+# the dynamic inventory plugin (inventory/devices.py) builds automatically
+# from devices/*.json + sites/*.json. Add a device to a prod site's
+# devices/<site_id>.json file and it picks up these vars with no further
+# change needed here.
+#
+# Named environment_name, not environment - "environment" is a reserved
+# Ansible play/task keyword (it sets env vars for module execution), so a
+# variable literally named "environment" is silently shadowed everywhere
+# else it's referenced.
+
+environment_name: prod
+description: "Production - fully live branch sites"
+disabled_roles: []
+auto_deploy: false

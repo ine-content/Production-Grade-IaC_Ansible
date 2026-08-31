@@ -1,0 +1,189 @@
+---
+# site.yml - Meridian Retail branch network, Production-Grade IaC with Ansible
+#
+# This is the one playbook this whole course builds, one stage at a time.
+# Every later TODO adds to what's already here - nothing you write in an
+# earlier TODO gets thrown away or rewritten later.
+
+- name: Meridian Retail branch network service
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    # =========================================================================
+    # TODO 02 - Load the Declarative Service Intent (already solved)
+    # =========================================================================
+
+    - name: load the declarative service intent
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/intent/retail_branch_service.yml"
+        name: service_intent
+
+    # =========================================================================
+    # END TODO 02
+    # =========================================================================
+
+
+    # =========================================================================
+    # TODO 03 - Run Pre-Flight Validation (already solved)
+    # =========================================================================
+
+    - name: pre-flight validation
+      ansible.builtin.assert:
+        that:
+          - disabled_roles | difference(service_intent.vlans | map(attribute='role') | list) | length == 0
+        fail_msg: "Pre-flight validation failed for {{ inventory_hostname }}."
+        success_msg: "Pre-flight validation passed for {{ inventory_hostname }}."
+      register: preflight_result
+
+    # =========================================================================
+    # END TODO 03
+    # =========================================================================
+
+    - name: report what was loaded for this device
+      ansible.builtin.debug:
+        msg:
+          - "Loaded service: {{ service_intent.service }}"
+          - "Loaded tenant: {{ service_intent.tenant }}"
+          - "Loaded environment: {{ environment_name }}"
+          - "Loaded device: {{ device_id }} ({{ platform }}, {{ site_id }})"
+          - "Loaded resolved_vlans: {{ resolved_vlans | map(attribute='id') | list }}"
+          - "Pre-flight validation passed."
+
+    # =========================================================================
+    # TODO 04 - Build Environment- and Site-Aware Render Facts (already solved)
+    # =========================================================================
+
+    - name: build render context
+      ansible.builtin.set_fact:
+        render_context:
+          site_id: "{{ site_id }}"
+          environment_name: "{{ environment_name }}"
+          tenant: "{{ service_intent.tenant }}"
+          service: "{{ service_intent.service }}"
+          hostname: "{{ hostname }}"
+          platform: "{{ platform }}"
+          vlans: "{{ resolved_vlans }}"
+
+    # =========================================================================
+    # END TODO 04
+    # =========================================================================
+
+    - name: report the render context for this device
+      ansible.builtin.debug:
+        msg:
+          - "Render context hostname: {{ render_context.hostname }}"
+          - "Render context vlans: {{ render_context.vlans | map(attribute='id') | list }}"
+
+    # =========================================================================
+    # TODO 05 - Render Multi-Platform Artifacts (already solved)
+    # =========================================================================
+
+    - name: render the platform-specific configuration
+      ansible.builtin.template:
+        src: "{{ platform_templates[render_context.platform] }}"
+        dest: "{{ playbook_dir }}/output/{{ device_id }}.cfg"
+      vars:
+        platform_templates:
+          cat8k: cat8k_ospf.j2
+          nexus9k: nexus_vlan.j2
+        hostname: "{{ render_context.hostname }}"
+        vlans: "{{ render_context.vlans }}"
+
+    # =========================================================================
+    # END TODO 05
+    # =========================================================================
+
+    - name: report the rendered artifact for this device
+      ansible.builtin.debug:
+        msg:
+          - "Rendered artifact: output/{{ device_id }}.cfg"
+          - "Rendered artifact first line: {{ (lookup('file', playbook_dir + '/output/' + device_id + '.cfg')).splitlines()[0] }}"
+
+    # =========================================================================
+    # TODO 06 - Run Post-Render Correctness Verification
+    # =========================================================================
+    #
+    # Goal:
+    #   The last outage happened because a config rendered without any
+    #   errors, but it was still wrong, and nobody double-checked the
+    #   actual output before it went out. Rendering without an error
+    #   (TODO 05) is not the same as rendering correctly - that gap is
+    #   exactly what this TODO closes, two different ways, before anything
+    #   gets published or pushed to a device.
+    #
+    #   Check 1 - golden-output regression testing: compare this device's
+    #   rendered artifact against golden/<site_id>/<device_id>.cfg, byte
+    #   for byte. If today's render doesn't match yesterday's known-good
+    #   render, something changed, and the pipeline should stop and say so
+    #   rather than publish it.
+    #
+    #   Check 2 - independent policy re-check: golden-output testing only
+    #   catches unintended CHANGE. It does not, by itself, prove the
+    #   environmental policy is correct if the golden file were ever wrong
+    #   or stale. This second check re-derives what should NOT be in this
+    #   device's own output directly from its own environment's policy -
+    #   disabled_vlan_markers (already computed for you in
+    #   inventory/devices.py, from group_vars/<environment>.yml's
+    #   disabled_roles, the same source TODO 03's pre-flight validation
+    #   already trusts) - and confirms none of those markers actually made
+    #   it into the rendered text. It never looks at resolved_vlans or
+    #   render_context for this - both already had disabled VLANs filtered
+    #   out before this device ever got here, so trusting either one could
+    #   never reveal a leak that happened anyway.
+    #
+    # Use ansible.builtin.assert twice:
+    #   1. that: the rendered artifact's own text
+    #      (lookup('file', playbook_dir + '/output/' + device_id + '.cfg'))
+    #      equals its golden reference's text
+    #      (lookup('file', playbook_dir + '/golden/' + site_id + '/' + device_id + '.cfg'))
+    #      Name this task exactly "verify rendered artifact against golden
+    #      reference".
+    #   2. that: none of this device's own disabled_vlan_markers appear as
+    #      a substring of that same rendered text
+    #      (lookup('file', playbook_dir + '/output/' + device_id + '.cfg')).
+    #      The Jinja `in` test doubles as substring containment when the
+    #      right-hand side is a string, not just list membership - so
+    #      disabled_vlan_markers | select('in', <that text>) | list gives
+    #      you exactly the markers (if any) that leaked through; that list
+    #      should be empty. Give this task register: policy_check_result.
+    #
+    # Give each assert task a fail_msg: naming what actually broke - a
+    # failed assert with no message just says "Assertion failed". Only the
+    # second task needs register: - if it runs at all, the first one
+    # already passed (Ansible stops a host at its first failed task), so
+    # one registered variable proves both ran. The guard task right after
+    # STUDENT WORK AREA (already provided, not yours to write) checks for
+    # policy_check_result to confirm both tasks actually ran at all.
+    #
+    # =========================================================================
+    # STUDENT WORK AREA - TODO 06
+    # =========================================================================
+                                                                             
+
+
+    # =========================================================================
+    # END STUDENT WORK AREA - TODO 06
+    # =========================================================================
+
+    # This guard is provided for you, same as the debug task below it - it's
+    # not part of what you write. It confirms both of your assert tasks
+    # above actually ran: policy_check_result (register: ... is only set
+    # once a task executes) can only be defined if the second task ran,
+    # which can only happen if the first task already passed - Ansible
+    # stops a host at its first failed task, so one registered variable is
+    # proof enough for both. Without this guard, a blank TODO 06 would fall
+    # straight through to the report task below and print both checks as
+    # passing even though nothing was ever verified.
+    - name: confirm post-render correctness verification was run
+      ansible.builtin.assert:
+        that:
+          - policy_check_result is defined
+        fail_msg: "TODO 06 not complete: post-render correctness verification was not run. See STUDENT WORK AREA - TODO 06 in site.yml."
+
+    - name: report post-render correctness verification for this device
+      ansible.builtin.debug:
+        msg:
+          - "output/{{ device_id }}.cfg matches golden/{{ site_id }}/{{ device_id }}.cfg"
+          - "No disabled VLAN markers leaked into the rendered output."
+          - "Post-render correctness verification passed."

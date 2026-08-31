@@ -1,0 +1,6 @@
+[
+  { "device_id": "rdu01-cat8k-01", "site_id": "rdu01", "platform": "cat8k",   "hostname": "MER-RDU01-CAT8K-01", "ip_address": "127.50.11.10", "restconf_port": 8543 },
+  { "device_id": "rdu01-cat8k-02", "site_id": "rdu01", "platform": "cat8k",   "hostname": "MER-RDU01-CAT8K-02", "ip_address": "127.50.11.11", "restconf_port": 8543 },
+  { "device_id": "rdu01-n9k-01",   "site_id": "rdu01", "platform": "nexus9k", "hostname": "MER-RDU01-N9K-01",   "ip_address": "127.50.11.20", "restconf_port": 8543 },
+  { "device_id": "rdu01-n9k-02",   "site_id": "rdu01", "platform": "nexus9k", "hostname": "MER-RDU01-N9K-02",   "ip_address": "127.50.11.21", "restconf_port": 8543 }
+]

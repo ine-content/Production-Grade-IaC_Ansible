@@ -1,0 +1,12 @@
+{
+  "site_id": "rdu01",
+  "region": "us-east",
+  "environment": "prod",
+  "vlan_ids": {
+    "users": 110,
+    "voice": 120,
+    "wifi": 130,
+    "guest": 140,
+    "unused": 199
+  }
+}

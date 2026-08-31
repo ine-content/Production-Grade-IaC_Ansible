@@ -1,0 +1,415 @@
+---
+# site.yml - Meridian Retail branch network, Production-Grade IaC with Ansible
+#
+# This is the one playbook this whole course builds, one stage at a time.
+# Every later TODO adds to what's already here - nothing you write in an
+# earlier TODO gets thrown away or rewritten later.
+
+- name: Meridian Retail branch network service
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    # =========================================================================
+    # TODO 02 - Load the Declarative Service Intent (already solved)
+    # =========================================================================
+
+    - name: load the declarative service intent
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/intent/retail_branch_service.yml"
+        name: service_intent
+
+    # =========================================================================
+    # END TODO 02
+    # =========================================================================
+
+
+    # =========================================================================
+    # TODO 03 - Run Pre-Flight Validation (already solved)
+    # =========================================================================
+
+    - name: pre-flight validation
+      ansible.builtin.assert:
+        that:
+          - disabled_roles | difference(service_intent.vlans | map(attribute='role') | list) | length == 0
+        fail_msg: "Pre-flight validation failed for {{ inventory_hostname }}."
+        success_msg: "Pre-flight validation passed for {{ inventory_hostname }}."
+      register: preflight_result
+
+    # =========================================================================
+    # END TODO 03
+    # =========================================================================
+
+    - name: report what was loaded for this device
+      ansible.builtin.debug:
+        msg:
+          - "Loaded service: {{ service_intent.service }}"
+          - "Loaded tenant: {{ service_intent.tenant }}"
+          - "Loaded environment: {{ environment_name }}"
+          - "Loaded device: {{ device_id }} ({{ platform }}, {{ site_id }})"
+          - "Loaded resolved_vlans: {{ resolved_vlans | map(attribute='id') | list }}"
+          - "Pre-flight validation passed."
+
+    # =========================================================================
+    # TODO 04 - Build Environment- and Site-Aware Render Facts (already solved)
+    # =========================================================================
+
+    - name: build render context
+      ansible.builtin.set_fact:
+        render_context:
+          site_id: "{{ site_id }}"
+          environment_name: "{{ environment_name }}"
+          tenant: "{{ service_intent.tenant }}"
+          service: "{{ service_intent.service }}"
+          hostname: "{{ hostname }}"
+          platform: "{{ platform }}"
+          vlans: "{{ resolved_vlans }}"
+
+    # =========================================================================
+    # END TODO 04
+    # =========================================================================
+
+    - name: report the render context for this device
+      ansible.builtin.debug:
+        msg:
+          - "Render context hostname: {{ render_context.hostname }}"
+          - "Render context vlans: {{ render_context.vlans | map(attribute='id') | list }}"
+
+    # =========================================================================
+    # TODO 05 - Render Multi-Platform Artifacts (already solved)
+    # =========================================================================
+
+    - name: render the platform-specific configuration
+      ansible.builtin.template:
+        src: "{{ platform_templates[render_context.platform] }}"
+        dest: "{{ playbook_dir }}/output/{{ device_id }}.cfg"
+      vars:
+        platform_templates:
+          cat8k: cat8k_ospf.j2
+          nexus9k: nexus_vlan.j2
+        hostname: "{{ render_context.hostname }}"
+        vlans: "{{ render_context.vlans }}"
+
+    # =========================================================================
+    # END TODO 05
+    # =========================================================================
+
+    - name: report the rendered artifact for this device
+      ansible.builtin.debug:
+        msg:
+          - "Rendered artifact: output/{{ device_id }}.cfg"
+          - "Rendered artifact first line: {{ (lookup('file', playbook_dir + '/output/' + device_id + '.cfg')).splitlines()[0] }}"
+
+    # =========================================================================
+    # TODO 06 - Run Post-Render Correctness Verification (already solved)
+    # =========================================================================
+
+    - name: verify rendered artifact against golden reference
+      ansible.builtin.assert:
+        that:
+          - lookup('file', playbook_dir + '/output/' + device_id + '.cfg')
+            == lookup('file', playbook_dir + '/golden/' + site_id + '/' + device_id + '.cfg')
+        fail_msg: "Rendered artifact for {{ device_id }} does not match golden/{{ site_id }}/{{ device_id }}.cfg."
+
+    - name: independently verify no disabled vlan leaked into the rendered output
+      ansible.builtin.assert:
+        that:
+          - disabled_vlan_markers
+            | select('in', lookup('file', playbook_dir + '/output/' + device_id + '.cfg'))
+            | list | length == 0
+        fail_msg: "A disabled VLAN marker leaked into output/{{ device_id }}.cfg."
+      register: policy_check_result
+
+    # =========================================================================
+    # END TODO 06
+    # =========================================================================
+
+    - name: report post-render correctness verification for this device
+      ansible.builtin.debug:
+        msg:
+          - "output/{{ device_id }}.cfg matches golden/{{ site_id }}/{{ device_id }}.cfg"
+          - "No disabled VLAN markers leaked into the rendered output."
+          - "Post-render correctness verification passed."
+
+    # =========================================================================
+    # TODO 07 - Publish Idempotently
+    # =========================================================================
+    #
+    # Goal:
+    #   Now that every artifact has been independently verified twice
+    #   (TODO 06), it's safe to actually publish it. But a pipeline that
+    #   rewrites every device's config file on every single run, whether
+    #   or not anything actually changed, makes it impossible to ever tell
+    #   a real change from noise. "We run this on a schedule - if it
+    #   rewrites every file every time, we can't trust file timestamps, we
+    #   can't tell a real change from noise, and every run looks like a
+    #   full redeploy. We need it to only touch a file when something
+    #   actually changed."
+    #
+    #   Python has to solve this by hand: hash the new content, compare it
+    #   against a hash saved from the last run, and only write to disk if
+    #   they differ. ansible.builtin.template already does exactly that
+    #   comparison internally, every time it runs, for free - it checksums
+    #   the content it's about to write against whatever's already at
+    #   dest, and only touches the file (and only reports changed: true)
+    #   if they're actually different. TODO 05's render task has already
+    #   been idempotent this whole time without you doing anything extra
+    #   for it.
+    #
+    #   This TODO makes that guarantee visible and proven, not just
+    #   assumed: re-run the exact same render immediately after it, and
+    #   confirm Ansible itself reports no change the second time.
+    #
+    # Use ansible.builtin.template (identical to TODO 05's own task) and
+    # ansible.builtin.assert to:
+    #   1. Render this device's config again, to the same dest, with the
+    #      same vars: - nothing here should look any different from
+    #      TODO 05's task.
+    #   2. register: the result under its own descriptive name - e.g.
+    #      republish_result. TODO 05's own render task doesn't register
+    #      anything at all, so there's no name it could collide with; the
+    #      point is just to name this result for what it actually proves.
+    #   3. assert that republish_result.changed is false - the file was
+    #      already correct, so writing "the same thing" again should be a
+    #      no-op, not a rewrite.
+    #
+    # =========================================================================
+    # STUDENT WORK AREA - TODO 07 (already solved)
+    # =========================================================================
+
+    - name: re-render the platform-specific configuration to confirm publishing is idempotent
+      ansible.builtin.template:
+        src: "{{ platform_templates[render_context.platform] }}"
+        dest: "{{ playbook_dir }}/output/{{ device_id }}.cfg"
+      vars:
+        platform_templates:
+          cat8k: cat8k_ospf.j2
+          nexus9k: nexus_vlan.j2
+        hostname: "{{ render_context.hostname }}"
+        vlans: "{{ render_context.vlans }}"
+      register: republish_result
+
+    - name: assert this device's config was not rewritten
+      ansible.builtin.assert:
+        that:
+          - not republish_result.changed
+        fail_msg: "{{ device_id }}'s config was rewritten even though nothing about it changed - publishing is not idempotent."
+        success_msg: "{{ device_id }}'s config was already correct on disk - nothing was rewritten."
+
+    # =========================================================================
+    # END TODO 07
+    # =========================================================================
+
+    - name: report idempotent publish result for this device
+      ansible.builtin.debug:
+        msg:
+          - "output/{{ device_id }}.cfg was already correct - publishing made no changes."
+
+    # =========================================================================
+    # TODO 08 - Build, Push, and Retry RESTCONF Configuration
+    # =========================================================================
+    #
+    # Goal:
+    #   Every artifact has been verified twice (TODO 06) and published
+    #   idempotently (TODO 07) - but a config file sitting on disk isn't
+    #   the same as a config actually running on a device. This TODO makes
+    #   a resilient delivery attempt per device over RESTCONF - but only
+    #   to devices that are actually allowed to receive it automatically.
+    #
+    #   group_vars/staging.yml already sets auto_deploy: true.
+    #   group_vars/prod.yml already sets it false. That flag exists for
+    #   exactly this moment: a real pipeline must never push to production
+    #   automatically just because the mechanism to do so works.
+    #   Production changes wait for an explicit human approval step - a
+    #   real GitLab pipeline's manual approval gate (a later lab), not
+    #   anything in this course's progressive labs. This TODO pushes to
+    #   the 2 staging devices only, and holds the 7 production devices
+    #   back untouched, indefinitely, within the scope of this lab.
+    #
+    #   You might expect ansible.netcommon.restconf_config here - it's the
+    #   module built specifically for RESTCONF. It needs an httpapi
+    #   connection plugin, though, and this whole course uses
+    #   ansible_connection: local (see inventory/devices.py) - every
+    #   device here is reached over plain HTTP, with connection details
+    #   just sitting in scope as ordinary hostvars, not through a real
+    #   Ansible connection plugin. ansible.builtin.uri is the right tool
+    #   instead: it ships with ansible-core (nothing to install), and
+    #   RESTCONF, underneath everything else, is just HTTP.
+    #
+    #   IT leadership's second requirement, layered on top of the first:
+    #   "Sometimes a push to a device just fails - a momentary network
+    #   blip, a device that's briefly overloaded - and if nothing retries
+    #   it, we lose a valid deployment over something that would have
+    #   worked one second later. But a network blip is not the same thing
+    #   as a bad password: if a push fails because of bad credentials, we
+    #   want the pipeline to stop immediately and tell us, not waste time
+    #   retrying something that will never succeed." Ansible already has a
+    #   built-in retry mechanism for exactly this - until:/retries:/delay:
+    #   on a task - so there's no while loop or manual backoff math to
+    #   write by hand here. The real job is deciding what "done" means: a
+    #   task with until: keeps re-running until that condition is true, or
+    #   it runs out of retries, whichever comes first.
+    #
+    # Use ansible.builtin.uri to:
+    #   1. Only run this task at all when auto_deploy is true (when:) -
+    #      staging only. A skipped task on a prod device is exactly the
+    #      point: it means nothing was sent, not that something failed.
+    #   2. PATCH "http://{{ ansible_host }}:{{ restconf_port }}{{ restconf_path }}"
+    #      (ansible_host, restconf_port, restconf_path are already hostvars -
+    #      see inventory/devices.py)
+    #   3. Send a JSON body: {"config": <the rendered artifact's text>}
+    #      Read that text back with:
+    #        lookup('file', playbook_dir + '/output/' + device_id + '.cfg')
+    #   4. Authenticate with Basic Auth, using this device's own environment
+    #      to pick which credentials to read:
+    #        url_username: lookup('env', 'RESTCONF_' ~ environment_name | upper ~ '_USERNAME')
+    #        url_password: lookup('env', 'RESTCONF_' ~ environment_name | upper ~ '_PASSWORD')
+    #      (same names mock_device_server.py checks against - see .env.example)
+    #      force_basic_auth: true
+    #   5. status_code: a wide range that includes both success and every
+    #      status you want to be able to inspect rather than crash on -
+    #      e.g. [200, 204, 401, 403, 422, 500, 502, 503, 504]. A plain
+    #      status_code: [204] would work for a single attempt, but uri's
+    #      default behavior is to treat any other status as an immediate,
+    #      fatal task failure, which would defeat until: before it ever
+    #      got a chance to retry.
+    #   6. failed_when: false - a task-level keyword (a sibling of
+    #      register:, until:, retries:, delay: - NOT nested inside the
+    #      uri: block itself) - so a bad response comes back as ordinary
+    #      data (push_result.status) to make your own retry decision
+    #      about, not a crash.
+    #   7. register: push_result, so the tasks after this one can report
+    #      the real HTTP status this device actually returned.
+    #   8. until: push_result.status | default(0) in [200, 204, 401, 403, 422] -
+    #      retry keeps going only while the status is something else (a
+    #      transient failure). A permanent failure (401/403/422) satisfies
+    #      until: immediately, on the very first attempt, so it's never
+    #      retried at all - retrying it would just waste time on
+    #      something that will never succeed. default(0) matters for a
+    #      reason status_code: alone doesn't cover: a connection that
+    #      fails outright (refused, timed out) never gets an HTTP response
+    #      at all, so push_result has no .status key that run - without
+    #      default(0), that's a hard templating error instead of a retry.
+    #   9. retries: 3
+    #   10. delay: 2
+    #
+    # =========================================================================
+    # STUDENT WORK AREA - TODO 08 (already solved)
+    # =========================================================================
+
+    - name: push rendered configuration via RESTCONF, retrying transient failures
+      when: auto_deploy
+      ansible.builtin.uri:
+        url: "http://{{ ansible_host }}:{{ restconf_port }}{{ restconf_path }}"
+        method: PATCH
+        body_format: json
+        body:
+          config: "{{ lookup('file', playbook_dir + '/output/' + device_id + '.cfg') }}"
+        url_username: "{{ lookup('env', 'RESTCONF_' ~ environment_name | upper ~ '_USERNAME') }}"
+        url_password: "{{ lookup('env', 'RESTCONF_' ~ environment_name | upper ~ '_PASSWORD') }}"
+        force_basic_auth: true
+        status_code: [200, 204, 401, 403, 422, 500, 502, 503, 504]
+      register: push_result
+      failed_when: false
+      until: push_result.status | default(0) in [200, 204, 401, 403, 422]
+      retries: 3
+      delay: 2
+
+    # =========================================================================
+    # END TODO 08
+    # =========================================================================
+
+    - name: fail immediately on a permanent RESTCONF error
+      when: auto_deploy and (push_result.status | default(0)) in [401, 403, 422]
+      ansible.builtin.fail:
+        msg: "Permanent failure pushing to {{ device_id }}: HTTP {{ push_result.status }} - not retrying."
+
+    - name: fail after exhausting retries on a transient RESTCONF error
+      when: auto_deploy and (push_result.status | default(0)) not in [200, 204, 401, 403, 422]
+      ansible.builtin.fail:
+        msg: "Exhausted retries pushing to {{ device_id }}: last status was {{ push_result.status | default('no response - connection failed') }}."
+
+    - name: report the push result for this staging device
+      when: auto_deploy and (push_result.status | default(0)) in [200, 204]
+      ansible.builtin.debug:
+        msg:
+          - "Pushed configuration to {{ device_id }} - HTTP {{ push_result.status }} (attempt {{ push_result.attempts | default(1) }})"
+
+    - name: report that this production device is held for approval
+      when: not auto_deploy
+      ansible.builtin.debug:
+        msg:
+          - "{{ device_id }} is a production device - held for approval, not pushed yet."
+
+    # =========================================================================
+    # TODO 09 - Verify Device State via RESTCONF
+    # =========================================================================
+    #
+    # Goal:
+    #   TODO 08 already made sure a push either succeeds or fails loudly -
+    #   but "succeeds" so far only means "the device replied with a 200 or
+    #   204." Leadership's harder requirement: "No trusting an HTTP 200 as
+    #   proof that a device actually changed." A device could accept a
+    #   PATCH, return a perfectly normal success status, and simply never
+    #   apply it - a firmware bug, a device silently rejecting a change it
+    #   didn't like, or (in this lab) a mock built specifically to test
+    #   whether you'd notice. Nothing about push_result.status can ever
+    #   reveal that on its own - only reading the device's live state back
+    #   independently can.
+    #
+    #   This only makes sense for devices that were actually pushed to -
+    #   the 7 production devices are still held for approval and have
+    #   nothing yet to verify.
+    #
+    # Use ansible.builtin.uri to:
+    #   1. Only run when auto_deploy is true AND the push actually
+    #      succeeded: auto_deploy and (push_result.status | default(0)) in [200, 204]
+    #   2. GET "http://{{ ansible_host }}:{{ restconf_port }}{{ restconf_path }}"
+    #      (the exact same URL the push just used)
+    #   3. Authenticate the same way the push did (url_username/url_password
+    #      via lookup('env', ...), force_basic_auth: true)
+    #   4. return_content: true, so the response body is available to read
+    #   5. register: verify_result
+    #
+    # Then use ansible.builtin.assert to:
+    #   1. that: the device's live config - verify_result.json.config -
+    #      equals what was supposed to be there:
+    #      lookup('file', playbook_dir + '/output/' + device_id + '.cfg')
+    #      (the same lookup the push task itself used - both sides go
+    #      through the same one-trailing-newline stripping, so they line
+    #      up exactly for a genuinely successful push)
+    #   2. Only run under the same when: as the GET above.
+    #
+    # =========================================================================
+    # STUDENT WORK AREA - TODO 09
+    # =========================================================================
+
+
+
+    # =========================================================================
+    # END STUDENT WORK AREA - TODO 09
+    # =========================================================================
+
+    # This guard is provided for you, same as the debug task below it - it's
+    # not part of what you write. It confirms your GET+assert tasks above
+    # actually ran (register: verify_result is only set once that task
+    # executes) - without it, a blank TODO 09 would fall straight through
+    # to the report task below and print "Verified" even though nothing was
+    # ever read back from the device. Gated by the same when: as your own
+    # tasks - a production device (auto_deploy: false), or a staging device
+    # whose push never actually succeeded, correctly never sets
+    # verify_result at all, and that's not incompleteness. If your assert
+    # task ran and failed, this guard never even gets reached - Ansible
+    # already stopped this host at your own fail_msg.
+    - name: confirm device state verification was run
+      when: auto_deploy and (push_result.status | default(0)) in [200, 204]
+      ansible.builtin.assert:
+        that:
+          - verify_result is defined
+        fail_msg: "TODO 09 not complete: device state verification was not run. See STUDENT WORK AREA - TODO 09 in site.yml."
+
+    - name: report device state verification for this staging device
+      when: auto_deploy and (push_result.status | default(0)) in [200, 204]
+      ansible.builtin.debug:
+        msg:
+          - "{{ device_id }} - live device state matches what was pushed. Verified."
