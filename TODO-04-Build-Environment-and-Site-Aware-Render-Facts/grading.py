@@ -74,7 +74,7 @@ FAIL_MESSAGES = {
 HINTS = {
     1: "Create intent/retail_branch_service.yml by hand. Match the shape in TASK.md (tenant, service, vlans: [{role, name, enabled}]) using the business requirements table exactly - YAML, not JSON.",
     2: "Use the include_vars module. Point its file: option at intent/retail_branch_service.yml (playbook_dir is the directory site.yml lives in), and set name: service_intent so the whole file lands under one variable instead of three separate loose variables.",
-    3: "Write one assert task whose that: condition checks that every role in disabled_roles is also a real role somewhere in service_intent.vlans - Jinja's `difference` filter returns items in the first list that are NOT in the second, so `disabled_roles | difference(<all valid roles>) | length == 0` means every disabled role was found among the valid ones. Add register: preflight_result too - the guard task right after STUDENT WORK AREA - TODO 03 checks for it to confirm this task actually ran at all.",
+    3: "First build a plain list of every valid role with a set_fact (service_intent.vlans | map(attribute='role') | list). Then write one assert task, looped with loop: \"{{ disabled_roles }}\", whose that: condition is simply `item in valid_roles` - true when the current disabled role is one of the real ones. Add register: preflight_result on this assert task too - the guard task right after STUDENT WORK AREA - TODO 03 checks for it to confirm this task actually ran at all.",
     4: "Use set_fact to build a dict named render_context with exactly these keys: site_id, environment_name, tenant (from service_intent.tenant), service (from service_intent.service), hostname, platform, and vlans (= resolved_vlans). Every value on the right already exists as a variable - this task only combines them.",
 }
 
@@ -101,12 +101,17 @@ vlans:
   ansible.builtin.include_vars:
     file: "{{ playbook_dir }}/intent/retail_branch_service.yml"
     name: service_intent''',
-    3: '''- name: pre-flight validation
+    3: '''- name: build the list of valid network names
+  ansible.builtin.set_fact:
+    valid_roles: "{{ service_intent.vlans | map(attribute='role') | list }}"
+
+- name: pre-flight validation
   ansible.builtin.assert:
     that:
-      - disabled_roles | difference(service_intent.vlans | map(attribute='role') | list) | length == 0
-    fail_msg: "Pre-flight validation failed for {{ inventory_hostname }}."
-    success_msg: "Pre-flight validation passed for {{ inventory_hostname }}."
+      - item in valid_roles
+    fail_msg: "{{ item }} is not a real network."
+    success_msg: "{{ item }} is a real network - OK to disable."
+  loop: "{{ disabled_roles }}"
   register: preflight_result''',
     4: '''- name: build render context
   ansible.builtin.set_fact:
@@ -298,9 +303,15 @@ def check_todo_3():
 
     Content-based, same reasoning as check_todo_2: a later TODO being
     blank makes the whole run's PLAY RECAP show failures for every host,
-    so pass/fail here is decided purely by whether each host's own
-    pre-flight validation task printed the fail_msg / success_msg it was
-    supposed to - never by recap counts."""
+    so pass/fail here can't rely on recap counts. It also can't rely on
+    the assert's own fail_msg/success_msg text, since the new solution
+    loops per disabled role and a production device with an empty
+    disabled_roles list never prints any per-item message at all.
+    Instead this checks for the shared "report what was loaded for this
+    device" debug task's own "Loaded device: <host> (...)" line - that
+    task is sequenced right after the pre-flight validation assert, so
+    it only ever prints for a host whose validation actually passed,
+    regardless of how many roles that host happens to be disabling."""
     if not STAGING_FILE.exists():
         return False
 
@@ -315,13 +326,10 @@ def check_todo_3():
         broken_text = broken_result.stdout + broken_result.stderr
 
         staging_correctly_failed = all(
-            f'"Pre-flight validation failed for {host}."' in broken_text
-            and f'"Pre-flight validation passed for {host}."' not in broken_text
-            for host in STAGING_DEVICES
+            f'"Loaded device: {host} (' not in broken_text for host in STAGING_DEVICES
         )
         prod_unaffected = all(
-            f'"Pre-flight validation passed for {host}."' in broken_text
-            for host in PROD_DEVICES
+            f'"Loaded device: {host} (' in broken_text for host in PROD_DEVICES
         )
     finally:
         STAGING_FILE.write_text(original, encoding="utf-8")
@@ -333,7 +341,7 @@ def check_todo_3():
     clean_text = clean_result.stdout + clean_result.stderr
 
     return all(
-        f'"Pre-flight validation passed for {host}."' in clean_text
+        f'"Loaded device: {host} (' in clean_text
         for host in (STAGING_DEVICES | PROD_DEVICES)
     )
 

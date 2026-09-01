@@ -28,12 +28,17 @@
     # TODO 03 - Run Pre-Flight Validation (already solved)
     # =========================================================================
 
+    - name: build the list of valid network names
+      ansible.builtin.set_fact:
+        valid_roles: "{{ service_intent.vlans | map(attribute='role') | list }}"
+
     - name: pre-flight validation
       ansible.builtin.assert:
         that:
-          - disabled_roles | difference(service_intent.vlans | map(attribute='role') | list) | length == 0
-        fail_msg: "Pre-flight validation failed for {{ inventory_hostname }}."
-        success_msg: "Pre-flight validation passed for {{ inventory_hostname }}."
+          - item in valid_roles
+        fail_msg: "{{ item }} is not a real network."
+        success_msg: "{{ item }} is a real network - OK to disable."
+      loop: "{{ disabled_roles }}"
       register: preflight_result
 
     # =========================================================================

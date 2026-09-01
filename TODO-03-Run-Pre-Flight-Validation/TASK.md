@@ -27,24 +27,32 @@ Network Engineering has said: "We've had an environment file disable a VLAN role
    assert checking preflight_result is defined) and the debug task
    after that already exist and aren't yours to write.
 
-2. Add one ansible.builtin.assert task with:
-     that:        one condition - true when every role in disabled_roles
-                  also appears among service_intent.vlans' roles
-     fail_msg:    names the failing device ({{ inventory_hostname }})
-     success_msg: names the passing device
-     register:    preflight_result   <- required. The guard task right
-                  after this block checks for it - without it, a blank
-                  TODO 03 would fall straight through to the "report
-                  what was loaded" task and print "Pre-flight
-                  validation passed." even though nothing was checked.
+2. Add one ansible.builtin.set_fact task that builds a plain list of
+   every valid network name:
+     valid_roles: "{{ service_intent.vlans | map(attribute='role') | list }}"
+   This is the master list - all five real network names, with
+   nothing else about each VLAN kept.
 
-3. Build the condition with Jinja's difference filter:
-     disabled_roles | difference(<all valid roles>) | length == 0
-   difference() returns items in the first list NOT found in the
-   second - 0 leftover items means every disabled role was valid. This
-   is the referential-integrity check - exactly what catches an
-   environment disabling a VLAN role that was never actually defined
-   in the intent, the "gust" vs. "guest" typo from the scenario above.
+3. Add one ansible.builtin.assert task, looped over disabled_roles,
+   with:
+     loop:        "{{ disabled_roles }}"   <- runs this check once per
+                  role this device is told to disable
+     that:        one condition - item in valid_roles
+                  (true when the current disabled role is actually
+                  one of the real ones)
+     fail_msg:    names the bad role ({{ item }} is not a real network.)
+     success_msg: names the good role ({{ item }} is a real network -
+                  OK to disable.)
+     register:    preflight_result   <- required, and goes on this
+                  assert task. Without it, a blank TODO 03 would
+                  silently print "Pre-flight validation passed." even
+                  though nothing was ever checked - the guard task
+                  right after this block relies on it.
+   This is the exact check that catches the scenario above: SEA03's
+   disabled_roles says "guest" - if that ever became a typo like
+   "gust" instead, "gust" would loop through this assert, "gust" in
+   valid_roles would be false, and this task would fail, naming the
+   exact bad role it happened on.
 
 4. Save, then run: python grading.py
 ```
