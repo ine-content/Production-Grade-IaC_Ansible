@@ -30,53 +30,57 @@ Neither template says `render_context.hostname` or `render_context.vlans`. If yo
 
 This TODO is the render step: pick the right template file for this device's platform, expose `render_context`'s fields under the names those templates actually expect, and write the result to `output/<device_id>.cfg`.
 
-## Your Task
-
-Inside `STUDENT WORK AREA - TODO 05` in `site.yml`, write one `ansible.builtin.template` task shaped like this:
-
-```yaml
-- name: render the platform-specific configuration
-  ansible.builtin.template:
-    src: <...>
-    dest: <...>
-  vars:
-    platform_templates:
-      cat8k: <...>
-      nexus9k: <...>
-    hostname: <...>
-    vlans: <...>
-```
-
-Fill in each `<...>`:
+## Steps
 
 ```
-src              - the right template for this device's platform, chosen by
-                   looking render_context.platform up in the
-                   platform_templates dict below
-dest             - "{{ playbook_dir }}/output/{{ device_id }}.cfg"
-platform_templates.cat8k    - cat8k_ospf.j2
-platform_templates.nexus9k  - nexus_vlan.j2
-hostname         - render_context.hostname
-vlans            - render_context.vlans
+1. Open site.yml and find STUDENT WORK AREA - TODO 05. Write your
+   solution only inside that block - the two guard tasks right after
+   it (stat + assert, checking output/<device_id>.cfg actually
+   exists) and the debug task after that already exist and aren't
+   yours to write.
+
+2. Add one ansible.builtin.template task:
+
+     - name: render the platform-specific configuration
+       ansible.builtin.template:
+         src: <...>
+         dest: <...>
+       vars:
+         platform_templates:
+           cat8k: <...>
+           nexus9k: <...>
+         hostname: <...>
+         vlans: <...>
+
+3. Fill in each <...>:
+
+     src              - the right template for this device's platform,
+                        chosen by looking render_context.platform up
+                        in the platform_templates dict below
+     dest             - "{{ playbook_dir }}/output/{{ device_id }}.cfg"
+     platform_templates.cat8k    - cat8k_ospf.j2
+     platform_templates.nexus9k  - nexus_vlan.j2
+     hostname         - render_context.hostname
+     vlans            - render_context.vlans
+
+   Both template files already exist under templates/ - Ansible finds
+   them there automatically, so src: only needs the filename, not a
+   full path. platform_templates[render_context.platform] looks up
+   this device's own platform and returns the matching filename, so
+   src: becomes one Jinja expression instead of an if/else chain.
+
+4. The vars: block matters because a task's own vars: only exists for
+   the duration of that task - it's the standard Ansible way to rename
+   a variable for something that expects a different name. Here,
+   that "something" is the template file itself, which was written
+   expecting hostname and vlans, not render_context.hostname and
+   render_context.vlans.
+
+5. Save, then run: python grading.py
+   (Running ./run_playbook.sh directly first, before writing anything,
+   fails the same way - the guard assert stops every device with
+   "TODO 05 not complete: ...", failed=1 in the PLAY RECAP.)
 ```
-
-Both template files already exist under `templates/` — Ansible finds them there automatically, so `src:` only needs the filename, not a full path.
-
-### Why the vars: block matters
-
-A task's own `vars:` only exists for the duration of that task, and it's the standard Ansible way to rename a variable for something that expects a different name — here, that "something" is the template file itself, which was written expecting `hostname` and `vlans`, not `render_context.hostname` and `render_context.vlans`.
-
-### Hints
-
-`platform_templates` is just a plain dict you're defining inline in `vars:` — nothing special about it beyond that. `platform_templates[render_context.platform]` looks up this device's own platform in that dict and returns the matching filename, so `src:` becomes one Jinja expression instead of an if/else chain — and adding a third platform later only means adding one more key to this dict.
-
-## Where to Write Your Code
-
-Open `site.yml`. Locate `STUDENT WORK AREA - TODO 05`. Write your solution only inside that block — the two guard tasks right after it (`stat` + `assert`, checking that `output/<device_id>.cfg` actually exists) and the `debug` task after that already exist and aren't yours to write. The `debug` task reads back the first line of `output/<device_id>.cfg` to prove something was actually rendered.
-
-### Running this directly, without `python grading.py`
-
-If you run `./run_playbook.sh` yourself before writing anything, every device genuinely fails on that guard task: `failed=1` in the PLAY RECAP, a non-zero exit code, and a `fatal: [host]: FAILED! => {...}` result carrying the "TODO 05 not complete: ..." message.
 
 ## Grading Check
 

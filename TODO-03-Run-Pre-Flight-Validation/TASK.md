@@ -19,33 +19,35 @@ Now that everything is loaded (TODO 02), nothing has actually confirmed it's cor
 
 Network Engineering has said: "We've had an environment file disable a VLAN role that didn't even exist — a typo, 'gust' instead of 'guest'. It didn't do anything, silently, and nobody noticed until a site that should have had guest wifi didn't. We want every cross-file reference checked before the pipeline renders or pushes anything."
 
-## Your Task
+## Steps
 
-Inside `STUDENT WORK AREA - TODO 03` in `site.yml`, write one `ansible.builtin.assert` task shaped like this:
-
-```yaml
-- name: pre-flight validation
-  ansible.builtin.assert:
-    that:
-      - <condition>
-    fail_msg: "<a message that says which device failed>"
-    success_msg: "<a message that says which device passed>"
-  register: preflight_result
 ```
+1. Open site.yml and find STUDENT WORK AREA - TODO 03. Write your
+   solution only inside that block - the guard task right after it (an
+   assert checking preflight_result is defined) and the debug task
+   after that already exist and aren't yours to write.
 
-`register: preflight_result` matters beyond just this task: the guard task right after `STUDENT WORK AREA - TODO 03` (already provided, not yours to write) checks for `preflight_result` to confirm this task actually ran at all - without it, a blank TODO 03 would fall straight through to the "report what was loaded" task and print "Pre-flight validation passed." even though nothing was ever checked.
+2. Add one ansible.builtin.assert task with:
+     that:        one condition - true when every role in disabled_roles
+                  also appears among service_intent.vlans' roles
+     fail_msg:    names the failing device ({{ inventory_hostname }})
+     success_msg: names the passing device
+     register:    preflight_result   <- required. The guard task right
+                  after this block checks for it - without it, a blank
+                  TODO 03 would fall straight through to the "report
+                  what was loaded" task and print "Pre-flight
+                  validation passed." even though nothing was checked.
 
-`<condition>` is a Jinja expression that must evaluate to `true`: every role in `disabled_roles` (this device's own environment policy, already merged in automatically from `group_vars`) is also a real role somewhere in `service_intent.vlans`. This is the referential-integrity check — exactly what catches an environment disabling a VLAN role that was never actually defined in the intent, the "gust" vs. "guest" typo from the scenario above.
+3. Build the condition with Jinja's difference filter:
+     disabled_roles | difference(<all valid roles>) | length == 0
+   difference() returns items in the first list NOT found in the
+   second - 0 leftover items means every disabled role was valid. This
+   is the referential-integrity check - exactly what catches an
+   environment disabling a VLAN role that was never actually defined
+   in the intent, the "gust" vs. "guest" typo from the scenario above.
 
-A failed assert with no `fail_msg:` just says "Assertion failed", which won't tell you which device broke — write one that names the device (`{{ inventory_hostname }}` works).
-
-### Hint
-
-Jinja's `difference` filter returns items in the first list that are NOT in the second — `disabled_roles | difference(<all valid roles>) | length == 0` means every disabled role was found among the valid ones.
-
-## Where to Write Your Code
-
-Open `site.yml`. Locate `STUDENT WORK AREA - TODO 03`. Write your solution only inside that block — the guard task right after it (an `assert` checking `preflight_result is defined`) and the `debug` task after that already exist and aren't yours to write.
+4. Save, then run: python grading.py
+```
 
 ### Running this directly, without `python grading.py`
 

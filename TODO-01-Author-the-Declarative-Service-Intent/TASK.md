@@ -213,27 +213,25 @@ This is the very first step in the whole pipeline. Nothing has been inventoried,
 
 Store Operations and Network Engineering have said: "We've agreed on the VLANs we need, but right now that agreement only exists in a meeting and a Slack thread — nothing a computer can actually read. Before any automation touches a single device, we want that agreement written down as a real file the system can load and trust."
 
-Create the file: `intent/retail_branch_service.yml`
-
-The file must be a YAML document shaped exactly like this:
-
-```yaml
-tenant: "<string>"
-service: "<string>"
-vlans:
-  - role: "<string>"
-    name: "<string>"
-    enabled: true
-```
-
-`vlans` is a list. Include one entry for every VLAN in the business requirements above, in any order, using the exact role, name, and enabled values given there.
-
-## Where to Write Your Code
-
-There is no code for this TODO. Create the YAML file directly at:
+## Steps
 
 ```
-intent/retail_branch_service.yml
+1. Create the file: intent/retail_branch_service.yml
+   There is no code for this TODO - this is the only file you write.
+
+2. Shape it exactly like this:
+     tenant: "<string>"
+     service: "<string>"
+     vlans:
+       - role: "<string>"
+         name: "<string>"
+         enabled: true
+
+3. Add one vlans entry per VLAN in the Business Requirements above, in
+   any order, using the exact role, name, and enabled values given
+   there. vlans is a list.
+
+4. Save, then run: python grading.py
 ```
 
 ## Grading Check

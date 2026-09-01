@@ -20,64 +20,74 @@ TODO 08 already made sure a push either succeeds or fails loudly — but "succee
 
 This only makes sense for devices that were actually pushed to — the 7 production devices are still held for approval and have nothing yet to verify.
 
-## Your Task
-
-Inside `STUDENT WORK AREA - TODO 09` in `site.yml`, write one `ansible.builtin.uri` GET task, followed by one `ansible.builtin.assert`:
-
-```yaml
-- name: verify device state via RESTCONF
-  when: <...>
-  ansible.builtin.uri:
-    url: <...>
-    method: GET
-    url_username: <...>
-    url_password: <...>
-    force_basic_auth: true
-    return_content: true
-  register: verify_result
-
-- name: assert the device's live state matches what was pushed
-  when: <...>
-  ansible.builtin.assert:
-    that:
-      - <...>
-    fail_msg: <...>
-    success_msg: <...>
-```
-
-Fill in each `<...>`:
+## Steps
 
 ```
-when (both tasks) - auto_deploy and (push_result.status | default(0)) in [200, 204]
-                    (only devices that were actually pushed to have
-                    anything to verify)
+1. Open site.yml and find STUDENT WORK AREA - TODO 09. Write your
+   solution only inside that block - the guard task right after it (an
+   assert checking verify_result is defined) and the debug task after
+   that already exist and aren't yours to write.
 
-url             - "http://{{ ansible_host }}:{{ restconf_port }}{{ restconf_path }}"
-                  (the exact same URL the push task just used)
+2. Add one ansible.builtin.uri GET task, followed by one
+   ansible.builtin.assert:
 
-url_username    - lookup('env', 'RESTCONF_' ~ environment_name | upper ~ '_USERNAME')
-url_password    - lookup('env', 'RESTCONF_' ~ environment_name | upper ~ '_PASSWORD')
-                  (same as the push task)
+     - name: verify device state via RESTCONF
+       when: <...>
+       ansible.builtin.uri:
+         url: <...>
+         method: GET
+         url_username: <...>
+         url_password: <...>
+         force_basic_auth: true
+         return_content: true
+       register: verify_result
 
-assert that:    - verify_result.json.config
-                  == lookup('file', playbook_dir + '/output/' + device_id + '.cfg')
+     - name: assert the device's live state matches what was pushed
+       when: <...>
+       ansible.builtin.assert:
+         that:
+           - <...>
+         fail_msg: <...>
+         success_msg: <...>
+
+3. Fill in each <...>:
+
+     when (both tasks) - auto_deploy and (push_result.status | default(0)) in [200, 204]
+                         (only devices that were actually pushed to
+                         have anything to verify)
+
+     url             - "http://{{ ansible_host }}:{{ restconf_port }}{{ restconf_path }}"
+                       (the exact same URL the push task just used)
+
+     url_username    - lookup('env', 'RESTCONF_' ~ environment_name | upper ~ '_USERNAME')
+     url_password    - lookup('env', 'RESTCONF_' ~ environment_name | upper ~ '_PASSWORD')
+                       (same as the push task)
+
+     assert that:    - verify_result.json.config
+                       == lookup('file', playbook_dir + '/output/' + device_id + '.cfg')
+
+4. Why this has to be a second, separate request: push_result only
+   ever tells you what the device SAID in response to the PATCH. It
+   cannot tell you what the device actually did with it afterward -
+   only a fresh GET checks the device's actual current state rather
+   than its immediate reply. A device that lies about a PATCH would
+   still make push_result.status look completely normal.
+
+5. Why the same lookup('file', ...) as the push task: whatever was
+   sent in the PATCH body already went through
+   lookup('file', playbook_dir + '/output/' + device_id + '.cfg') in
+   TODO 08's task, which strips exactly one trailing newline every
+   time it's used. Reading the same file the same way here means both
+   sides of this comparison went through that stripping exactly once.
+
+6. return_content: true is what makes the response body available to
+   read afterward - without it, verify_result.json wouldn't exist.
+   verify_result.json.config reaches into the same {"config": "..."}
+   shape the mock device always returns from a GET (see
+   mock_device_server.py's do_GET if you want to see it directly).
+
+7. Save, then run: python grading.py
 ```
-
-### Why this has to be a second, separate request
-
-`push_result` only ever tells you what the device *said* in response to the PATCH. It cannot tell you what the device actually did with it afterward - those are two different claims, and only one of them (a fresh GET) is checking the device's actual current state rather than its immediate reply. A device that lies about a PATCH would still make `push_result.status` look completely normal.
-
-### Why the same lookup('file', ...) as the push task
-
-Whatever was actually sent in the PATCH body already went through `lookup('file', playbook_dir + '/output/' + device_id + '.cfg')` in TODO 08's task - and that lookup strips exactly one trailing newline, every time it's used. Reading the same file the same way here means both sides of this comparison went through that stripping exactly once, so a genuinely successful push compares equal without any extra `.rstrip()` gymnastics on your part.
-
-### Hints
-
-`return_content: true` is what makes the response body available to read afterward - without it, `verify_result.json` wouldn't exist. `verify_result.json.config` reaches into the same `{"config": "..."}` shape the mock device always returns from a GET (see `mock_device_server.py`'s `do_GET` if you want to see it directly).
-
-## Where to Write Your Code
-
-Open `site.yml`. Locate `STUDENT WORK AREA - TODO 09`. Write your solution only inside that block — the `debug` task right after it already exists and reports that this device's live state was verified.
 
 ## Grading Check
 

@@ -43,88 +43,123 @@ But a real device doesn't only ever return 204. IT leadership's complaint: "Some
 
 `until:`/`retries:`/`delay:` have to live directly on the one task making the attempt - a task's own `until:` already re-runs that exact task, so there's no way to "add retry" as a second task layered after a first, plain push; that would mean pushing twice per device instead of retrying once. This is why there's only one `STUDENT WORK AREA` here: one task does the push and the retry together.
 
-## Your Task
-
-Inside `STUDENT WORK AREA - TODO 08` in `site.yml`, write one `ansible.builtin.uri` task shaped like this:
-
-```yaml
-- name: push rendered configuration via RESTCONF, retrying transient failures
-  when: <...>
-  ansible.builtin.uri:
-    url: <...>
-    method: PATCH
-    body_format: json
-    body:
-      config: <...>
-    url_username: <...>
-    url_password: <...>
-    force_basic_auth: true
-    status_code: <...>
-  register: push_result
-  failed_when: <...>
-  until: <...>
-  retries: <...>
-  delay: <...>
-```
-
-Fill in each `<...>`:
+## Steps
 
 ```
-when            - auto_deploy
-                  (already true on staging devices, false on prod - see
-                  group_vars/staging.yml and group_vars/prod.yml)
+1. Open site.yml and find STUDENT WORK AREA - TODO 08. Write your
+   solution only inside that block - everything after it already
+   exists and isn't yours to write: a guard task (an assert, gated
+   the same when: auto_deploy, checking push_result is defined), a
+   fail task that fires immediately on a permanent RESTCONF error, a
+   fail task that fires if every retry on a transient error was used
+   up without success, and two debug tasks - one reporting
+   push_result.status and the attempt count for staging devices that
+   got pushed, the other reporting that a production device is being
+   held for approval.
 
-url             - "http://{{ ansible_host }}:{{ restconf_port }}{{ restconf_path }}"
-                  (ansible_host, restconf_port, restconf_path are already
-                  hostvars - see inventory/devices.py)
+2. Add one ansible.builtin.uri task:
 
-body.config     - this device's own rendered artifact, read back as text:
-                  lookup('file', playbook_dir + '/output/' + device_id + '.cfg')
+     - name: push rendered configuration via RESTCONF, retrying transient failures
+       when: <...>
+       ansible.builtin.uri:
+         url: <...>
+         method: PATCH
+         body_format: json
+         body:
+           config: <...>
+         url_username: <...>
+         url_password: <...>
+         force_basic_auth: true
+         status_code: <...>
+       register: push_result
+       failed_when: <...>
+       until: <...>
+       retries: <...>
+       delay: <...>
 
-url_username    - lookup('env', 'RESTCONF_' ~ environment_name | upper ~ '_USERNAME')
-url_password    - lookup('env', 'RESTCONF_' ~ environment_name | upper ~ '_PASSWORD')
+3. Fill in each <...>:
 
-status_code     - [200, 204, 401, 403, 422, 500, 502, 503, 504]
-                  (every status you want to inspect instead of crash on)
+     when            - auto_deploy
+                       (already true on staging devices, false on prod
+                       - see group_vars/staging.yml and group_vars/prod.yml)
 
-failed_when     - false
-                  (a task-level keyword - a sibling of register:, until:,
-                  retries:, delay: - NOT a parameter nested inside the
-                  uri: block itself)
+     url             - "http://{{ ansible_host }}:{{ restconf_port }}{{ restconf_path }}"
+                       (ansible_host, restconf_port, restconf_path are
+                       already hostvars - see inventory/devices.py)
 
-until           - push_result.status | default(0) in [200, 204, 401, 403, 422]
+     body.config     - this device's own rendered artifact, read back
+                       as text: lookup('file', playbook_dir + '/output/' + device_id + '.cfg')
 
-retries         - 3
-delay           - 2
+     url_username    - lookup('env', 'RESTCONF_' ~ environment_name | upper ~ '_USERNAME')
+     url_password    - lookup('env', 'RESTCONF_' ~ environment_name | upper ~ '_PASSWORD')
+
+     status_code     - [200, 204, 401, 403, 422, 500, 502, 503, 504]
+                       (every status you want to inspect instead of crash on)
+
+     failed_when     - false
+                       (a task-level keyword - a sibling of register:,
+                       until:, retries:, delay: - NOT a parameter
+                       nested inside the uri: block itself)
+
+     until           - push_result.status | default(0) in [200, 204, 401, 403, 422]
+
+     retries         - 3
+     delay           - 2
+
+4. why when: auto_deploy matters here specifically: a task that's
+   skipped (when: is false) is Ansible's way of saying "this genuinely
+   never ran" - nothing was sent, nothing to roll back. That's exactly
+   the property you want for production: not "the push failed safely,"
+   but "the push never happened at all until someone approves it."
+   Leaving when: off this task would push to all 9 devices, prod
+   included, the moment this TODO runs.
+
+5. why force_basic_auth and status_code matter: without
+   force_basic_auth: true, uri only sends credentials after a server
+   first replies with a 401 challenge - an extra round trip this mock
+   doesn't bother with, so the first request would come back
+   unauthenticated. uri's default behavior treats any status outside
+   200-299 as an immediate, fatal task failure - that default would
+   defeat until: before it ever gets a chance to retry. Listing every
+   status you care about in status_code:, combined with
+   failed_when: false, turns a non-2xx response into ordinary data
+   (push_result.status) to make a retry decision about, instead of a
+   crash.
+
+6. why until: stops retrying on 401/403/422: until: keeps a task going
+   only while its condition is FALSE. Listing 401, 403, 422 alongside
+   the success codes 200, 204 means a permanent error already
+   satisfies the condition on the very first attempt, so it's never
+   retried at all. Anything else (500, 503, ...) leaves the condition
+   false, so Ansible tries again, up to retries more times, waiting
+   delay seconds in between.
+
+7. why default(0) matters: a connection that fails outright - refused,
+   timed out, DNS failure - never gets a real HTTP response at all, so
+   push_result has no .status key that attempt. Referencing
+   push_result.status directly would then be a hard templating error
+   instead of a retry. default(0) gives Jinja a safe fallback (an int
+   not in either list) so a totally failed connection attempt is
+   correctly treated as "keep retrying."
+
+8. register: push_result doesn't affect whether this task succeeds -
+   it exists so the guard and report tasks after it can read
+   push_result.status for the staging devices that actually ran the
+   task. 'RESTCONF_' ~ environment_name | upper ~ '_USERNAME' is Jinja
+   string concatenation (~) building the exact env var name
+   mock_device_server.py checks against - for a staging device that's
+   RESTCONF_STAGING_USERNAME.
+
+9. Save, then run: python grading.py
+   (Running ./run_playbook.sh directly first, before writing anything,
+   the 2 staging devices fail on the guard task with "TODO 08 not
+   complete: ..." - an unambiguous message, distinct from what the
+   "exhausted retries" task would otherwise say ("last status was no
+   response - connection failed."), which reads exactly like what a
+   CORRECT solution says if the mock server were genuinely
+   unreachable. The 7 production devices correctly show skipped, not
+   failed - when: auto_deploy is false for them, and that's expected.)
 ```
-
-### Why when: auto_deploy matters here specifically
-
-A task that's skipped (`when:` is false) is Ansible's way of saying "this genuinely never ran" - nothing was sent, nothing was attempted, nothing to roll back. That's exactly the property you want for production: not "the push failed safely," but "the push never happened at all until someone approves it." Leaving `when:` off this task would push to all 9 devices, prod included, the moment this TODO runs - silently defeating the whole point of `auto_deploy` existing.
-
-### Why force_basic_auth and status_code matter
-
-Without `force_basic_auth: true`, `uri` only sends credentials after a server first replies with a 401 challenge - an extra round trip this mock doesn't bother with, so the very first request would come back unauthenticated. `uri`'s default behavior is to treat any status outside 200-299 as an immediate, fatal task failure - fine for a single no-retry attempt, but that default would defeat `until:` before it ever gets a chance to retry. Listing every status you care about in `status_code:`, combined with `failed_when: false` below, turns a non-2xx response into ordinary data (`push_result.status`) for you to make a retry decision about, instead of a crash.
-
-### Why until: stops retrying on 401/403/422
-
-`until:` keeps a task going only while its condition is *false*. Listing `401, 403, 422` alongside the success codes `200, 204` means a permanent error already satisfies the condition on the very first attempt — so it's never retried at all, exactly like a 200/204 wouldn't be. Anything else (a 500, 503, or similar) leaves the condition false, so Ansible tries again, up to `retries` more times, waiting `delay` seconds in between.
-
-### Why default(0) matters
-
-A connection that fails outright — refused, timed out, DNS failure — never gets a real HTTP response at all, so `push_result` has no `.status` key that attempt. Referencing `push_result.status` directly would then be a hard templating error instead of a retry. `default(0)` gives Jinja a safe fallback (an int that isn't in either list) so a totally failed connection attempt is correctly treated as "keep retrying," the same as any other transient failure.
-
-### Hints
-
-`register: push_result` doesn't affect whether this task succeeds - it exists so the guard and report tasks right after it (already written for you) can read `push_result.status`, the actual HTTP status code this device ended up with, only for the staging devices that actually ran the task. `'RESTCONF_' ~ environment_name | upper ~ '_USERNAME'` is Jinja string concatenation (`~`) building the exact env var name `mock_device_server.py` checks against - for a staging device that's `RESTCONF_STAGING_USERNAME`.
-
-## Where to Write Your Code
-
-Open `site.yml`. Locate `STUDENT WORK AREA - TODO 08`. Write your solution only inside that block — everything after it already exists and isn't yours to write: a guard task (an `assert`, gated the same `when: auto_deploy`, checking `push_result is defined`), a `fail` task that fires immediately on a permanent RESTCONF error, a `fail` task that fires if every retry on a transient error was used up without success, and two `debug` tasks - one reporting `push_result.status` and the attempt count for staging devices that got pushed, the other reporting that a production device is being held for approval.
-
-### Running this directly, without `python grading.py`
-
-If you run `./run_playbook.sh` yourself before writing anything, the 2 staging devices genuinely fail on the guard task: `failed=1` in the PLAY RECAP, a non-zero exit code, and a `fatal: [host]: FAILED! => {...}` result carrying the "TODO 08 not complete: ..." message. Without that guard, the failure would instead come from the "exhausted retries" task, with a message that reads exactly like a genuine connection failure - `"last status was no response - connection failed."` - indistinguishable from what a *correct* solution would say if the mock server really were unreachable. The guard fails first instead, with an unambiguous message. The 7 production devices correctly skip everything (`when: auto_deploy` is false for them) and show `skipped`, not `failed` - that's expected, not a sign anything's wrong.
 
 ## Grading Check
 

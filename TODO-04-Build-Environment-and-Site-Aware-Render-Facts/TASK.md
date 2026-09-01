@@ -36,44 +36,44 @@ TODO 05's render step needs ONE clean fact to hand to the Jinja template - not t
 
 This mirrors the Python course's `RenderContext` object, with one real difference: there, TODO 4 also did the VLAN filtering and sorting itself. Here, that work already happened once, centrally, in the dynamic inventory, for every device - see `inventory/devices.py` if you want the details. This TODO is only the assembly step: gather what already exists into the one shape the renderer expects.
 
-## Your Task
-
-Inside `STUDENT WORK AREA - TODO 04` in `site.yml`, write one `ansible.builtin.set_fact` task shaped like this:
-
-```yaml
-- name: build render context
-  ansible.builtin.set_fact:
-    render_context:
-      site_id: <...>
-      environment_name: <...>
-      tenant: <...>
-      service: <...>
-      hostname: <...>
-      platform: <...>
-      vlans: <...>
-```
-
-Fill in each value using a variable that's already available on this device:
+## Steps
 
 ```
-site_id            - this device's own site_id
-environment_name   - this device's own environment_name
-tenant             - service_intent.tenant
-service            - service_intent.service
-hostname           - this device's own hostname
-platform           - this device's own platform
-vlans              - this device's own resolved_vlans
+1. Open site.yml and find STUDENT WORK AREA - TODO 04. Write your
+   solution only inside that block - the guard task right after it (an
+   assert checking render_context is defined) and the debug task
+   after that already exist and aren't yours to write.
+
+2. Add one ansible.builtin.set_fact task building one dict:
+
+     - name: build render context
+       ansible.builtin.set_fact:
+         render_context:
+           site_id: <...>
+           environment_name: <...>
+           tenant: <...>
+           service: <...>
+           hostname: <...>
+           platform: <...>
+           vlans: <...>
+
+3. Fill in each value using a variable that's already available on
+   this device - nothing here is computed, this task only combines
+   existing variables into one dict:
+
+     site_id            - this device's own site_id
+     environment_name   - this device's own environment_name
+     tenant             - service_intent.tenant
+     service            - service_intent.service
+     hostname           - this device's own hostname
+     platform           - this device's own platform
+     vlans              - this device's own resolved_vlans
+
+4. Save, then run: python grading.py
+   (Running ./run_playbook.sh directly first, before writing anything,
+   fails the same way - the guard assert stops every device with
+   "TODO 04 not complete: ...", failed=1 in the PLAY RECAP.)
 ```
-
-Nothing here is computed - every value on the right already exists as a variable. This task only combines them into one dict.
-
-## Where to Write Your Code
-
-Open `site.yml`. Locate `STUDENT WORK AREA - TODO 04`. Write your solution only inside that block — the guard task right after it (an `assert` checking `render_context is defined`) and the `debug` task after that already exist and aren't yours to write. The `debug` task reads `render_context.hostname` and `render_context.vlans` to prove it was built correctly.
-
-### Running this directly, without `python grading.py`
-
-If you run `./run_playbook.sh` yourself before writing anything, every device genuinely fails on that guard task: `failed=1` in the PLAY RECAP, a non-zero exit code, and a `fatal: [host]: FAILED! => {...}` result carrying the "TODO 04 not complete: ..." message.
 
 ## Grading Check
 

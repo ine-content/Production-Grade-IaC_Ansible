@@ -42,52 +42,70 @@ vars:
 
 The fix: build the dict **and** call `| to_json` inside the very same `{{ ... }}` expression, in one pass. That keeps every value a real Python `bool`/`int`/`None` right up until the instant it's serialized, so `to_json` emits `true`, `204`, and `null` the way a real audit consumer expects — not the strings `"True"`, `"204"`, `"None"`.
 
-## Your Task
-
-Inside `STUDENT WORK AREA - TODO 10` in `site.yml`, write one `ansible.builtin.shell` task:
-
-```yaml
-- name: append this device's audit record to the shared audit log
-  vars:
-    audit_line: <...>
-  ansible.builtin.shell: <...>
-```
-
-Fill in each `<...>`:
+## Steps
 
 ```
-audit_line - one {{ ... }} | to_json expression, built from a single
-             Jinja dict literal with exactly these 7 keys:
+1. Open site.yml and find STUDENT WORK AREA - TODO 10. Write your
+   solution only inside that block - the guard task right after it (an
+   assert checking audit_result is defined) and the debug task after
+   that already exist and aren't yours to write.
 
-               device_id     - device_id
-               platform      - platform
-               site_id       - site_id
-               environment   - environment_name
-               pushed        - auto_deploy and (push_result.status | default(0)) in [200, 204]
-               push_status   - push_result.status | default(none)
-               verified      - auto_deploy and (push_result.status | default(0)) in [200, 204]
+2. Add one ansible.builtin.shell task:
 
-             pushed and verified are the same expression here on
-             purpose: by the time this task runs, TODO 09's own assert
-             has already stopped this host if a push had succeeded but
-             verification then failed - so if execution reaches this
-             task at all, a successful push always means a verified one.
+     - name: append this device's audit record to the shared audit log
+       vars:
+         audit_line: <...>
+       ansible.builtin.shell: <...>
+       register: audit_result
 
-ansible.builtin.shell -
-             printf '%s\n' {{ audit_line | quote }} >> {{ playbook_dir }}/logs/audit.jsonl
+3. Fill in each <...>:
+
+     audit_line - one {{ ... }} | to_json expression, built from a
+                  single Jinja dict literal with exactly these 7 keys:
+
+                    device_id     - device_id
+                    platform      - platform
+                    site_id       - site_id
+                    environment   - environment_name
+                    pushed        - auto_deploy and (push_result.status | default(0)) in [200, 204]
+                    push_status   - push_result.status | default(none)
+                    verified      - auto_deploy and (push_result.status | default(0)) in [200, 204]
+
+                  pushed and verified are the same expression here on
+                  purpose: by the time this task runs, TODO 09's own
+                  assert has already stopped this host if a push had
+                  succeeded but verification then failed - so if
+                  execution reaches this task at all, a successful
+                  push always means a verified one.
+
+     ansible.builtin.shell -
+                  printf '%s\n' {{ audit_line | quote }} >> {{ playbook_dir }}/logs/audit.jsonl
+
+     register:  - audit_result   <- required. The guard task right
+                  after this block checks for it - without it, a
+                  blank TODO 10 would fall straight through to the
+                  "report the audit record" task and print a success
+                  message even though nothing was ever appended.
+
+4. Why | quote: audit_line is a JSON string, completely full of double
+   quotes and colons - exactly the characters that would otherwise
+   confuse the shell parsing this command. The quote filter (a thin
+   wrapper around Python's shlex.quote) wraps the whole string in
+   single quotes and escapes anything inside it that needs escaping,
+   so it survives the trip through the shell as one literal argument.
+
+5. push_result is already register:-ed by TODO 08's task for every
+   device, whether or not auto_deploy was true for it - a production
+   device just has a push_result describing a SKIPPED task instead of
+   a real HTTP response, which is why push_result.status | default(0)
+   is the right way to read it everywhere in this playbook. A dict
+   literal inside {{ ... }} uses normal Python/Jinja syntax:
+   {'key': value, 'key2': value2} - single-quoted keys, no
+   key: value YAML-style colons-without-quotes, since this is Jinja,
+   not YAML, once you're inside the {{ }}.
+
+6. Save, then run: python grading.py
 ```
-
-### Why `| quote`
-
-`audit_line` is a JSON string, which means it's completely full of double quotes and colons - exactly the characters that would otherwise confuse the shell parsing this command. The `quote` filter (a thin wrapper around Python's `shlex.quote`) wraps the whole string in single quotes and escapes anything inside it that needs escaping, so it survives the trip through the shell as one literal argument, unchanged.
-
-### Hints
-
-`push_result` is already `register:`-ed by TODO 08's task for every device, whether or not `auto_deploy` was true for it - a production device just has a `push_result` describing a *skipped* task instead of a real HTTP response, which is exactly why `push_result.status | default(0)` (already used everywhere else in this playbook) is the right way to read it. A dict literal inside `{{ ... }}` uses normal Python/Jinja syntax: `{'key': value, 'key2': value2}` - single-quoted keys, no `key: value` YAML-style colons-without-quotes, since this whole thing is Jinja, not YAML, once you're inside the `{{ }}`.
-
-## Where to Write Your Code
-
-Open `site.yml`. Locate `STUDENT WORK AREA - TODO 10`. Write your solution only inside that block — the `debug` task right after it already exists and reports that this device's outcome was logged.
 
 ## Grading Check
 

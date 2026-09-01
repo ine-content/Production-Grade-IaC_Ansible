@@ -30,59 +30,77 @@ Rendering without an error (TODO 05) is not the same as rendering correctly — 
 
 `disabled_vlan_markers` is already computed for you, per device, in `inventory/devices.py` — the exact substring that would reveal a disabled VLAN in *this* device's own rendered text (a VLAN database entry for a Nexus 9K switch, an OSPF network statement for a CAT8K router — see `vlan_marker()` in that file if you want the detail, though you don't need to read it to complete this TODO). It's built from `group_vars/<environment>.yml`'s `disabled_roles` — the same source TODO 03's pre-flight validation already trusts.
 
-## Your Task
-
-Inside `STUDENT WORK AREA - TODO 06` in `site.yml`, write two `ansible.builtin.assert` tasks:
-
-```yaml
-- name: verify rendered artifact against golden reference
-  ansible.builtin.assert:
-    that:
-      - <...>
-    fail_msg: <...>
-
-- name: independently verify no disabled vlan leaked into the rendered output
-  ansible.builtin.assert:
-    that:
-      - <...>
-    fail_msg: <...>
-  register: policy_check_result
-```
-
-Fill in each `<...>`:
+## Steps
 
 ```
-Task 1 that:      lookup('file', playbook_dir + '/output/' + device_id + '.cfg')
-                  == lookup('file', playbook_dir + '/golden/' + site_id + '/' + device_id + '.cfg')
+1. Open site.yml and find STUDENT WORK AREA - TODO 06. Write your
+   solution only inside that block - the guard task right after it (an
+   assert checking policy_check_result is defined) and the debug task
+   after that already exist and aren't yours to write.
 
-Task 2 that:      disabled_vlan_markers
-                  | select('in', lookup('file', playbook_dir + '/output/' + device_id + '.cfg'))
-                  | list | length == 0
+2. Add two ansible.builtin.assert tasks:
+
+     - name: verify rendered artifact against golden reference
+       ansible.builtin.assert:
+         that:
+           - <...>
+         fail_msg: <...>
+
+     - name: independently verify no disabled vlan leaked into the rendered output
+       ansible.builtin.assert:
+         that:
+           - <...>
+         fail_msg: <...>
+       register: policy_check_result
+
+   Keep the first task's name exactly "verify rendered artifact
+   against golden reference" - the grader restarts the playbook at
+   that exact task name for one part of its check.
+
+3. Fill in each <...>:
+
+     Task 1 that:  lookup('file', playbook_dir + '/output/' + device_id + '.cfg')
+                   == lookup('file', playbook_dir + '/golden/' + site_id + '/' + device_id + '.cfg')
+
+     Task 2 that:  disabled_vlan_markers
+                   | select('in', lookup('file', playbook_dir + '/output/' + device_id + '.cfg'))
+                   | list | length == 0
+
+   Both tasks read the same rendered file back with lookup('file', ...).
+   fail_msg can say whatever's useful to you; the grader checks live
+   device behavior and specific text, not your exact wording.
+
+4. Only the second task needs register: policy_check_result - if it
+   runs at all, the first task already passed (Ansible stops a host at
+   its first failed task), so one registered variable is proof enough
+   that both ran. Without it, a blank TODO 06 would fall straight
+   through to the "report post-render correctness verification" task
+   and print both checks as passing even though nothing was checked.
+
+5. Why select('in', rendered_text) works as a substring check: Jinja's
+   in test doubles as two different things depending on what's on its
+   right-hand side - list membership when the right side is a list,
+   but substring containment when the right side is a plain string,
+   exactly like Python's own in operator. disabled_vlan_markers |
+   select('in', rendered_text) keeps only the markers that appear as a
+   substring of rendered_text, so | list | length == 0 means "none of
+   them showed up."
+
+6. Why this check doesn't just reuse resolved_vlans: resolved_vlans
+   (and render_context.vlans) already has every disabled VLAN filtered
+   out, before this device's render task ever ran. If a bug upstream
+   caused a disabled VLAN to leak into the rendered text anyway,
+   resolved_vlans would have no way of knowing - it never saw the leak
+   happen. disabled_vlan_markers is built the other way around,
+   straight from disabled_roles and this site's own VLAN IDs, so it
+   can catch exactly the kind of leak resolved_vlans is structurally
+   blind to.
+
+7. Save, then run: python grading.py
+   (Running ./run_playbook.sh directly first, before writing anything,
+   fails the same way - the guard assert stops every device with
+   "TODO 06 not complete: ...", failed=1 in the PLAY RECAP.)
 ```
-
-Keep the first task's name exactly `verify rendered artifact against golden reference` - the grader restarts the playbook at that exact task name for one part of its check.
-
-Only the second task needs `register: policy_check_result` - if it runs at all, the first task already passed (Ansible stops a host at its first failed task), so one registered variable is proof enough that both ran. The guard task right after `STUDENT WORK AREA - TODO 06` (already provided, not yours to write) checks for `policy_check_result` to confirm this - without it, a blank TODO 06 would fall straight through to the "report post-render correctness verification" task and print both checks as passing even though nothing was ever checked.
-
-### Why select('in', rendered_text) works as a substring check
-
-Jinja's `in` test doubles as two different things depending on what's on its right-hand side: list membership when the right side is a list, but substring containment when the right side is a plain string — exactly like Python's own `in` operator, which Jinja's test is built directly on top of. `disabled_vlan_markers | select('in', rendered_text)` tests every marker in the list against that same rule, keeping only the ones that appear as a substring of `rendered_text` — so `| list | length == 0` means "none of them showed up."
-
-### Why this check doesn't just reuse resolved_vlans
-
-`resolved_vlans` (and therefore `render_context.vlans`) already has every disabled VLAN filtered out, before this device's render task ever ran. If a bug anywhere upstream caused a disabled VLAN to leak into the rendered text anyway, `resolved_vlans` would have no way of knowing — it never saw the leak happen. `disabled_vlan_markers` is deliberately built the other way around, straight from `disabled_roles` and this site's own VLAN IDs, so it can catch exactly the kind of leak `resolved_vlans` is structurally blind to.
-
-### Hints
-
-Both tasks read the same rendered file back with `lookup('file', ...)`. `fail_msg` can say whatever's useful to you; the grader checks live device behavior and specific text, not your exact wording.
-
-## Where to Write Your Code
-
-Open `site.yml`. Locate `STUDENT WORK AREA - TODO 06`. Write your solution only inside that block — the guard task right after it (an `assert` checking `golden_check_result is defined` and `policy_check_result is defined`) and the `debug` task after that already exist and aren't yours to write.
-
-### Running this directly, without `python grading.py`
-
-If you run `./run_playbook.sh` yourself before writing anything, every device genuinely fails on that guard task: `failed=1` in the PLAY RECAP, a non-zero exit code, and a `fatal: [host]: FAILED! => {...}` result carrying the "TODO 06 not complete: ..." message.
 
 ## Grading Check
 

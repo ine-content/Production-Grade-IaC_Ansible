@@ -24,64 +24,75 @@ A hand-written pipeline (in plain Python, say) has to solve this itself: hash th
 
 This TODO doesn't add a new mechanism. It makes an existing guarantee visible and proven, rather than just assumed: re-run the exact same render immediately after it, and confirm Ansible itself reports no change the second time.
 
-## Your Task
-
-Inside `STUDENT WORK AREA - TODO 07` in `site.yml`, write one `ansible.builtin.template` task — identical to TODO 05's own task — followed by one `ansible.builtin.assert`:
-
-```yaml
-- name: re-render the platform-specific configuration to confirm publishing is idempotent
-  ansible.builtin.template:
-    src: <...>
-    dest: <...>
-  vars:
-    platform_templates:
-      cat8k: <...>
-      nexus9k: <...>
-    hostname: <...>
-    vlans: <...>
-  register: <...>
-
-- name: assert this device's config was not rewritten
-  ansible.builtin.assert:
-    that:
-      - <...>
-    fail_msg: <...>
-    success_msg: <...>
-```
-
-Fill in each `<...>` — the template task is a straight copy of TODO 05's:
+## Steps
 
 ```
-src              - platform_templates[render_context.platform]
-dest             - "{{ playbook_dir }}/output/{{ device_id }}.cfg"
-platform_templates.cat8k    - cat8k_ospf.j2
-platform_templates.nexus9k  - nexus_vlan.j2
-hostname         - render_context.hostname
-vlans            - render_context.vlans
-register         - republish_result
+1. Open site.yml and find STUDENT WORK AREA - TODO 07. Write your
+   solution only inside that block - the guard task right after it (an
+   assert checking republish_result is defined) and the debug task
+   after that already exist and aren't yours to write.
 
-assert that:     - not republish_result.changed
+2. Add one ansible.builtin.template task - identical to TODO 05's own
+   task - followed by one ansible.builtin.assert:
+
+     - name: re-render the platform-specific configuration to confirm publishing is idempotent
+       ansible.builtin.template:
+         src: <...>
+         dest: <...>
+       vars:
+         platform_templates:
+           cat8k: <...>
+           nexus9k: <...>
+         hostname: <...>
+         vlans: <...>
+       register: <...>
+
+     - name: assert this device's config was not rewritten
+       ansible.builtin.assert:
+         that:
+           - <...>
+         fail_msg: <...>
+         success_msg: <...>
+
+3. Fill in each <...> - the template task is a straight copy of
+   TODO 05's:
+
+     src              - platform_templates[render_context.platform]
+     dest             - "{{ playbook_dir }}/output/{{ device_id }}.cfg"
+     platform_templates.cat8k    - cat8k_ospf.j2
+     platform_templates.nexus9k  - nexus_vlan.j2
+     hostname         - render_context.hostname
+     vlans            - render_context.vlans
+     register         - republish_result
+
+     assert that:     - not republish_result.changed
+
+4. This task looking identical to TODO 05's is the point, not an
+   oversight - idempotency is a property of running the SAME
+   declarative action again and getting nothing to happen. If it
+   looked different from TODO 05's, it wouldn't actually be testing
+   whether the same operation is safe to repeat.
+
+5. Name this task's result republish_result rather than something
+   generic - TODO 05's own render task doesn't register anything, so
+   there's no existing name to collide with, but a descriptive name
+   makes it clear at a glance which result is which (one is the first
+   write, one is the proof-of-no-change).
+
+6. republish_result.changed is false when Ansible compared the
+   content it was about to write against what's already at dest and
+   found them identical - true means it actually rewrote the file. If
+   your assert fails here, the most likely cause isn't your assert -
+   it's a small difference between this task's src/dest/vars and
+   TODO 05's (a typo in dest, a different platform_templates key,
+   wrong vars: names), causing Ansible to render something that
+   doesn't quite match what's already on disk.
+
+7. Save, then run: python grading.py
+   (Running ./run_playbook.sh directly first, before writing anything,
+   fails the same way - the guard assert stops every device with
+   "TODO 07 not complete: ...", failed=1 in the PLAY RECAP.)
 ```
-
-### Why this task looks identical to TODO 05's
-
-That's the point, not an oversight. Idempotency isn't a different set of instructions for "the second time" - it's a property of running the *same* declarative action again and getting nothing to happen. If TODO 07's task looked different from TODO 05's, it wouldn't actually be testing whether the same operation is safe to repeat.
-
-### Why register: republish_result
-
-Name this task's result for what it actually proves, rather than something generic. TODO 05's own render task doesn't register anything at all, so there's no existing name to collide with here - a descriptive name is just good practice, since these two tasks run at different points for different reasons (one is the first write, one is the proof-of-no-change), and a reader should be able to tell which result is which at a glance.
-
-### Hints
-
-`republish_result.changed` is `false` when Ansible compared the content it was about to write against what's already at `dest` and found them identical - `true` means it actually rewrote the file. If your assert fails here, the most likely cause isn't your assert - it's a small difference between this task's `src`/`dest`/`vars` and TODO 05's (a typo in `dest`, a different `platform_templates` key, wrong `vars:` names), causing Ansible to render something that doesn't quite match what's already on disk.
-
-## Where to Write Your Code
-
-Open `site.yml`. Locate `STUDENT WORK AREA - TODO 07`. Write your solution only inside that block — the guard task right after it (an `assert` checking `republish_result is defined`) and the `debug` task after that already exist and aren't yours to write.
-
-### Running this directly, without `python grading.py`
-
-If you run `./run_playbook.sh` yourself before writing anything, every device genuinely fails on that guard task: `failed=1` in the PLAY RECAP, a non-zero exit code, and a `fatal: [host]: FAILED! => {...}` result carrying the "TODO 07 not complete: ..." message.
 
 ## Grading Check
 
