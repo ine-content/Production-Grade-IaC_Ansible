@@ -42,7 +42,17 @@ None of that is what this TODO is about. It's already done — that's the point 
    service_intent.tenant, service_intent.service, and
    service_intent.vlans are all available afterward.
 
-3. There is no separate "parse" step to write. include_vars does both
+3. Save, then run: python grading.py
+   (Running ./run_playbook.sh directly first, before writing anything,
+   fails the same way - the guard assert stops every device with
+   "TODO 02 not complete: ...", failed=1 in the PLAY RECAP, non-zero
+   exit code. Depending on your Ansible version you may also see an
+   "[ERROR]: Task failed: Action failed" callout above that - that's
+   newer ansible-core's own extra diagnostic context for any failed
+   task, not a second problem.)
+
+Note: 
+   There is no separate "parse" step to write. include_vars does both
    in one move - Ansible variables are just nested dicts and lists, so
    the moment it reads the YAML, that structure already IS the parsed
    result (service_intent.vlans is already a real list with real
@@ -53,15 +63,6 @@ None of that is what this TODO is about. It's already done — that's the point 
    dataclass field-by-field. Ansible has no equivalent "convert a raw
    dict into a typed object" step, because it has no static types to
    convert into.
-
-4. Save, then run: python grading.py
-   (Running ./run_playbook.sh directly first, before writing anything,
-   fails the same way - the guard assert stops every device with
-   "TODO 02 not complete: ...", failed=1 in the PLAY RECAP, non-zero
-   exit code. Depending on your Ansible version you may also see an
-   "[ERROR]: Task failed: Action failed" callout above that - that's
-   newer ansible-core's own extra diagnostic context for any failed
-   task, not a second problem.)
 ```
 
 ## Grading Check
