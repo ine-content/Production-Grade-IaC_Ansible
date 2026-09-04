@@ -51,52 +51,57 @@ Rendering without an error (TODO 05) is not the same as rendering correctly — 
          that:
            - <...>
          fail_msg: <...>
+         success_msg: <...>
+       loop: <...>
        register: policy_check_result
 
-   Keep the first task's name exactly "verify rendered artifact
-   against golden reference" - the grader restarts the playbook at
-   that exact task name for one part of its check.
-
-3. Fill in each <...>:
-
-     Task 1 that:  lookup('file', playbook_dir + '/output/' + device_id + '.cfg')
-                   == lookup('file', playbook_dir + '/golden/' + site_id + '/' + device_id + '.cfg')
-
-     Task 2 that:  disabled_vlan_markers
-                   | select('in', lookup('file', playbook_dir + '/output/' + device_id + '.cfg'))
-                   | list | length == 0
-
-   Both tasks read the same rendered file back with lookup('file', ...).
-   fail_msg can say whatever's useful to you; the grader checks live
-   device behavior and specific text, not your exact wording.
-
-4. Only the second task needs register: policy_check_result - if it
+   Keep both task names exactly as shown - "verify rendered artifact
+   against golden reference" and "independently verify no disabled
+   vlan leaked into the rendered output". The grader restarts the
+   playbook at the first task's exact name for one part of its check,
+   and identifies each task's own pass/fail result by its name for
+   both checks - fail_msg/success_msg wording is entirely up to you.
+   Only the second task needs register: policy_check_result - if it
    runs at all, the first task already passed (Ansible stops a host at
    its first failed task), so one registered variable is proof enough
    that both ran. Without it, a blank TODO 06 would fall straight
    through to the "report post-render correctness verification" task
    and print both checks as passing even though nothing was checked.
 
-5. Why select('in', rendered_text) works as a substring check: Jinja's
-   in test doubles as two different things depending on what's on its
-   right-hand side - list membership when the right side is a list,
-   but substring containment when the right side is a plain string,
-   exactly like Python's own in operator. disabled_vlan_markers |
-   select('in', rendered_text) keeps only the markers that appear as a
-   substring of rendered_text, so | list | length == 0 means "none of
-   them showed up."
+3. Fill in each <...>:
 
-6. Why this check doesn't just reuse resolved_vlans: resolved_vlans
-   (and render_context.vlans) already has every disabled VLAN filtered
-   out, before this device's render task ever ran. If a bug upstream
-   caused a disabled VLAN to leak into the rendered text anyway,
-   resolved_vlans would have no way of knowing - it never saw the leak
-   happen. disabled_vlan_markers is built the other way around,
-   straight from disabled_roles and this site's own VLAN IDs, so it
-   can catch exactly the kind of leak resolved_vlans is structurally
-   blind to.
+     Task 1 that:  lookup('file', playbook_dir + '/output/' + device_id + '.cfg')
+                   == lookup('file', playbook_dir + '/golden/' + site_id + '/' + device_id + '.cfg')
 
-7. Save, then run: python grading.py
+     Task 2 loop:  "{{ disabled_vlan_markers }}"   <- runs this check once per
+                   marker this device's own environment disables
+
+     Task 2 that:  item not in lookup('file', playbook_dir + '/output/' + device_id + '.cfg')
+
+   Both tasks read the same rendered file back with lookup('file', ...).
+   fail_msg can say whatever's useful to you; the grader checks live
+   device behavior and specific text, not your exact wording.
+   item not in rendered_text works as a substring check because
+   Jinja's in test doubles as two different things depending on what's
+   on its right-hand side - list membership when the right side is a
+   list, but substring containment when the right side is a plain
+   string, exactly like Python's own in operator. Looping over
+   disabled_vlan_markers and checking item not in rendered_text, once
+   per marker, means each iteration asks "did this one marker leak in?"
+   directly - no filtering a whole list down and counting what's left,
+   just a plain yes/no per marker. A device with no disabled VLANs at
+   all (disabled_vlan_markers is empty) simply runs this task zero
+   times - nothing to check, so nothing can fail.
+   This check can't just reuse resolved_vlans: resolved_vlans (and
+   render_context.vlans) already has every disabled VLAN filtered out,
+   before this device's render task ever ran. If a bug upstream caused
+   a disabled VLAN to leak into the rendered text anyway, resolved_vlans
+   would have no way of knowing - it never saw the leak happen.
+   disabled_vlan_markers is built the other way around, straight from
+   disabled_roles and this site's own VLAN IDs, so it can catch exactly
+   the kind of leak resolved_vlans is structurally blind to.
+
+4. Save, then run: python grading.py
    (Running ./run_playbook.sh directly first, before writing anything,
    fails the same way - the guard assert stops every device with
    "TODO 06 not complete: ...", failed=1 in the PLAY RECAP.)

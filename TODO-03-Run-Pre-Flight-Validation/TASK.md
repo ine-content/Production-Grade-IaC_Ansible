@@ -48,6 +48,9 @@ Network Engineering has said: "We've had an environment file disable a VLAN role
                   silently print "Pre-flight validation passed." even
                   though nothing was ever checked - the guard task
                   right after this block relies on it.
+   fail_msg and success_msg can say whatever's useful to you - the
+   grader checks whether this task passes or fails per device (via
+   the PLAY RECAP), not your exact wording.
    This is the exact check that catches the scenario above: SEA03's
    disabled_roles says "guest" - if that ever became a typo like
    "gust" instead, "gust" would loop through this assert, "gust" in

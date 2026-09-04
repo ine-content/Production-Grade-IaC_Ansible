@@ -50,24 +50,29 @@
     #   want every cross-file reference checked before the pipeline
     #   renders or pushes anything."
     #
-    # Write ONE assert task whose `that:` condition fails unless every
-    # role in disabled_roles (this device's own environment policy,
-    # already merged in automatically from group_vars) is also a real
-    # role somewhere in service_intent.vlans - the referential-integrity
-    # check that catches exactly the "gust" vs "guest" typo above.
+    # Write TWO tasks:
+    #   1. An ansible.builtin.set_fact task that builds valid_roles - a
+    #      plain list of every real network name:
+    #        service_intent.vlans | map(attribute='role') | list
+    #   2. One ansible.builtin.assert task, looped over disabled_roles
+    #      (this device's own environment policy, already merged in
+    #      automatically from group_vars), whose `that:` condition
+    #      fails unless the current role (`item`) is also a real role
+    #      in valid_roles - the referential-integrity check that
+    #      catches exactly the "gust" vs "guest" typo above.
     #
     # Give the assert task a `fail_msg:` and `success_msg:` - a failed
     # assert with no message just says "Assertion failed", which won't
-    # tell you which device or role broke. Also give it
+    # tell you which role broke. Also give it
     # `register: preflight_result` - the guard task right after STUDENT
     # WORK AREA (already provided, not yours to write) checks for that
     # variable to confirm this task actually ran at all, the same way
     # TODO 02's guard checked for service_intent.
     #
-    # Hint: Jinja's `difference` filter returns items in the first list
-    # that are NOT in the second -
-    #   disabled_roles | difference(<all valid roles>) | length == 0
-    # means every disabled role was found among the valid ones.
+    # Hint: loop: "{{ disabled_roles }}" runs the assert task once per
+    # disabled role, with `item` set to that one role each time - so
+    # the condition is simply `item in valid_roles`, no need to compare
+    # two whole lists against each other at once.
     #
     # =========================================================================
     # STUDENT WORK AREA - TODO 03

@@ -99,7 +99,7 @@ HINTS = {
     3: "First build a plain list of every valid role with a set_fact (service_intent.vlans | map(attribute='role') | list). Then write one assert task, looped with loop: \"{{ disabled_roles }}\", whose that: condition is simply `item in valid_roles` - true when the current disabled role is one of the real ones. Add register: preflight_result on this assert task too - the guard task right after STUDENT WORK AREA - TODO 03 checks for it to confirm this task actually ran at all.",
     4: "Use set_fact to build a dict named render_context with exactly these keys: site_id, environment_name, tenant (from service_intent.tenant), service (from service_intent.service), hostname, platform, and vlans (= resolved_vlans). Every value on the right already exists as a variable - this task only combines them.",
     5: "Use the template module with src: chosen by render_context.platform (cat8k -> cat8k_ospf.j2, nexus9k -> nexus_vlan.j2) and dest: output/<device_id>.cfg. The templates expect plain hostname and vlans variables, not render_context.hostname/render_context.vlans - use this task's own vars: to expose them under those exact names.",
-    6: "Write two assert tasks. First: lookup('file', ...output.../<device_id>.cfg) equals lookup('file', ...golden.../<device_id>.cfg). Second: disabled_vlan_markers (already computed for you in inventory/devices.py) | select('in', <that same rendered text>) | list | length == 0 - the Jinja 'in' test does substring containment when the right side is a string, so this finds any disabled VLAN marker that leaked into the rendered text, independently of golden - register: policy_check_result on this second task only (if it runs at all, the first one already passed). The guard task right after STUDENT WORK AREA - TODO 06 checks for policy_check_result to confirm both tasks actually ran.",
+    6: "Write two assert tasks. First: lookup('file', ...output.../<device_id>.cfg) equals lookup('file', ...golden.../<device_id>.cfg). Second: loop over disabled_vlan_markers (already computed for you in inventory/devices.py) and assert item not in <that same rendered text> for each one - the Jinja 'in' test does substring containment when the right side is a string, so this finds any disabled VLAN marker that leaked into the rendered text, independently of golden - register: policy_check_result on this second task only (if it runs at all, the first one already passed). The guard task right after STUDENT WORK AREA - TODO 06 checks for policy_check_result to confirm both tasks actually ran.",
 }
 
 SOLUTIONS = {
@@ -167,10 +167,10 @@ vlans:
 - name: independently verify no disabled vlan leaked into the rendered output
   ansible.builtin.assert:
     that:
-      - disabled_vlan_markers
-        | select('in', lookup('file', playbook_dir + '/output/' + device_id + '.cfg'))
-        | list | length == 0
-    fail_msg: "A disabled VLAN marker leaked into output/{{ device_id }}.cfg."
+      - item not in lookup('file', playbook_dir + '/output/' + device_id + '.cfg')
+    fail_msg: "{{ item }} was found in output/{{ device_id }}.cfg but should have been disabled."
+    success_msg: "{{ item }} is correctly absent from output/{{ device_id }}.cfg."
+  loop: "{{ disabled_vlan_markers }}"
   register: policy_check_result''',
 }
 
@@ -456,6 +456,56 @@ def check_todo_5():
     return True
 
 
+def task_block(text, task_name):
+    """Every output line belonging to one named task's own run, up to
+    (but not including) the next TASK banner - so a completely
+    different, possibly still-blank, later task's failure can never be
+    mistaken for this task's own result."""
+    lines = text.splitlines()
+    banner = f"TASK [{task_name}]"
+    start = None
+    for i, line in enumerate(lines):
+        if line.strip().startswith(banner):
+            start = i + 1
+            break
+    if start is None:
+        return ""
+    end = len(lines)
+    for i in range(start, len(lines)):
+        if lines[i].strip().startswith("TASK ["):
+            end = i
+            break
+    return "\n".join(lines[start:end])
+
+
+def task_failed_for_host(text, task_name, host):
+    """True if this exact task's own output shows host actually failing
+    it (a fatal:/failed: line for that host) - independent of whatever
+    fail_msg text the task itself happens to be written with."""
+    block = task_block(text, task_name)
+    return any(
+        line.strip().startswith(f"fatal: [{host}]") or line.strip().startswith(f"failed: [{host}]")
+        for line in block.splitlines()
+    )
+
+
+def task_passed_for_host(text, task_name, host):
+    """True if this exact task's own output shows host completing it
+    without failing: ok:/changed: (ran and passed), or skipping: (a
+    looped task with nothing to check for this host - not a failure)."""
+    block = task_block(text, task_name)
+    return any(
+        line.strip().startswith(f"ok: [{host}]")
+        or line.strip().startswith(f"changed: [{host}]")
+        or line.strip().startswith(f"skipping: [{host}]")
+        for line in block.splitlines()
+    )
+
+
+GOLDEN_TASK_NAME = "verify rendered artifact against golden reference"
+POLICY_TASK_NAME = "independently verify no disabled vlan leaked into the rendered output"
+
+
 def check_todo_6():
     """Three-part proof, mirroring TODO 06's own two independent assert
     tasks:
@@ -507,11 +557,12 @@ def check_todo_6():
     finally:
         golden_file.write_text(original_golden, encoding="utf-8")
 
-    golden_check_caught_it = (
-        f"Rendered artifact for {sample_host} does not match" in broken_text
+    golden_check_caught_it = task_failed_for_host(broken_text, GOLDEN_TASK_NAME, sample_host)
+    others_unaffected = all(
+        task_passed_for_host(broken_text, GOLDEN_TASK_NAME, host)
+        for host in expected_devices
+        if host != sample_host
     )
-    success_count = broken_text.count('"Post-render correctness verification passed."')
-    others_unaffected = success_count == len(expected_devices) - 1
 
     if not (golden_check_caught_it and others_unaffected):
         return False
@@ -541,9 +592,7 @@ def check_todo_6():
         policy_golden_file.write_text(original_policy_golden, encoding="utf-8")
         policy_output_file.write_text(original_policy_output, encoding="utf-8")
 
-    policy_check_caught_it = (
-        f"A disabled VLAN marker leaked into output/{staging_host}.cfg." in policy_text
-    )
+    policy_check_caught_it = task_failed_for_host(policy_text, POLICY_TASK_NAME, staging_host)
     if not policy_check_caught_it:
         return False
 

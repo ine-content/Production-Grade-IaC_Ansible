@@ -119,10 +119,10 @@
     - name: independently verify no disabled vlan leaked into the rendered output
       ansible.builtin.assert:
         that:
-          - disabled_vlan_markers
-            | select('in', lookup('file', playbook_dir + '/output/' + device_id + '.cfg'))
-            | list | length == 0
-        fail_msg: "A disabled VLAN marker leaked into output/{{ device_id }}.cfg."
+          - item not in lookup('file', playbook_dir + '/output/' + device_id + '.cfg')
+        fail_msg: "{{ item }} was found in output/{{ device_id }}.cfg but should have been disabled."
+        success_msg: "{{ item }} is correctly absent from output/{{ device_id }}.cfg."
+      loop: "{{ disabled_vlan_markers }}"
       register: policy_check_result
 
     # =========================================================================
