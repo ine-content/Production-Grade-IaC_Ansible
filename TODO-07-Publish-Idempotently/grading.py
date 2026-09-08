@@ -27,11 +27,15 @@ compare alone would trivially pass) and re-runs starting at the
 verification tasks only, confirming the independent policy re-check still
 catches it on its own.
 
-TODO 07 is checked by running the playbook twice in a row with no changes
-in between: the first run must report exactly one changed task per device
-(TODO 05's fresh render), and the second run - the actual proof of
-idempotency - must report exactly zero changed tasks per device, meaning
-TODO 07's own re-render genuinely found nothing left to do.
+TODO 07 is checked three ways: (1) a first run must report exactly one
+changed task per device (TODO 05's fresh render), (2) a second run right
+after must report exactly zero changed tasks per device - proof TODO 07's
+own re-render genuinely found nothing left to do, and (3) the grader
+deliberately corrupts one device's already-rendered output and re-runs
+starting at TODO 07's own re-render task for just that device, confirming
+Ansible's own changed counter flips to true and the assert task genuinely
+fails - proof the assert is really checking republish_result.changed and
+not just a no-op that always succeeds.
 """
 
 import json
@@ -648,6 +652,25 @@ def parse_recap_changed(text):
     return changed
 
 
+def extract_student_task_block(site_text, todo_number):
+    """Extract just the task YAML written for one TODO's STUDENT WORK
+    AREA, whether it's still blank (this folder's own TODO) or already
+    pre-solved (a later folder, where the same markers carry an
+    "(already solved)" suffix and a shorter END TODO N marker instead) -
+    used by check_todo_7's fault-injection phase to test the real,
+    currently in-place code rather than a hardcoded copy of it."""
+    start_pattern = re.compile(
+        rf"# STUDENT WORK AREA - TODO {todo_number:02d}.*?\n"
+        rf"\s*# =+\n",
+    )
+    end_pattern = re.compile(
+        rf"\n\s*# =+\n\s*# END (?:STUDENT WORK AREA - )?TODO {todo_number:02d}\b"
+    )
+    start_match = start_pattern.search(site_text)
+    end_match = end_pattern.search(site_text, start_match.end())
+    return site_text[start_match.end():end_match.start()]
+
+
 def check_todo_7():
     """Runs the whole playbook twice in a row, with nothing else changed
     in between - the actual test of idempotency, not just a content
@@ -688,10 +711,89 @@ def check_todo_7():
     if any(second_changed.get(host) != 0 for host in expected_devices):
         return False
 
-    return all(
-        f'"{host}\'s config was already correct on disk - nothing was rewritten."' in second_text
+    if not all(
+        task_passed_for_host(second_text, "assert this device's config was not rewritten", host)
         for host in expected_devices
+    ):
+        return False
+
+    # --- Phase 3: force a real change, confirm the assert genuinely catches it ---
+    # Everything above can be satisfied by a no-op `that: true` condition -
+    # Ansible's own PLAY RECAP changed counts only reflect the template
+    # task, never the assert task itself, so a fake assert that always
+    # "passes" would sail through both runs above undetected. This closes
+    # that gap the same way TODO 03/06 do: inject a real fault (corrupt
+    # one device's already-correct output file), then re-test using a
+    # small scratch playbook containing only what TODO 07's own two
+    # tasks actually need (service_intent, render_context) plus the
+    # student's own TODO 07 block extracted verbatim from site.yml.
+    # This can't just be `--start-at-task` on the real site.yml: that
+    # would skip render_context's own build task too (undefined
+    # variable), and even fixed, TODO 06's own golden-file check sits
+    # between TODO 05 and TODO 07 in every later folder and would catch
+    # the corruption as its own, unrelated failure before TODO 07 ever
+    # got a chance to react to it. Running a minimal scratch playbook
+    # sidesteps both problems while still testing the real, currently
+    # in-place TODO 07 code, not a hardcoded copy of it.
+    sample_host = "rdu01-cat8k-01"
+    output_file = OUTPUT_DIR / f"{sample_host}.cfg"
+    original_output = output_file.read_text(encoding="utf-8")
+
+    site_text = SITE_FILE.read_text(encoding="utf-8")
+    student_block = extract_student_task_block(site_text, 7)
+
+    scratch_file = ROOT / "_todo7_fault_injection_scratch.yml"
+    scratch_file.write_text(
+        "---\n"
+        "- name: fault injection scratch test for TODO 07\n"
+        "  hosts: all\n"
+        "  gather_facts: false\n"
+        "  tasks:\n"
+        "    - name: load the declarative service intent\n"
+        "      ansible.builtin.include_vars:\n"
+        "        file: \"{{ playbook_dir }}/intent/retail_branch_service.yml\"\n"
+        "        name: service_intent\n"
+        "\n"
+        "    - name: build render context\n"
+        "      ansible.builtin.set_fact:\n"
+        "        render_context:\n"
+        "          site_id: \"{{ site_id }}\"\n"
+        "          environment_name: \"{{ environment_name }}\"\n"
+        "          tenant: \"{{ service_intent.tenant }}\"\n"
+        "          service: \"{{ service_intent.service }}\"\n"
+        "          hostname: \"{{ hostname }}\"\n"
+        "          platform: \"{{ platform }}\"\n"
+        "          vlans: \"{{ resolved_vlans }}\"\n"
+        + student_block,
+        encoding="utf-8",
     )
+
+    try:
+        output_file.write_text(original_output + "\ncorrupted-by-grader\n", encoding="utf-8")
+        third_result = subprocess.run(
+            ["ansible-playbook", "-i", str(INVENTORY_FILE), str(scratch_file), "--limit", sample_host],
+            cwd=ROOT, text=True, capture_output=True,
+        )
+        third_text = third_result.stdout + "\n" + third_result.stderr
+    finally:
+        output_file.write_text(original_output, encoding="utf-8")
+        if scratch_file.exists():
+            scratch_file.unlink()
+
+    third_changed = parse_recap_changed(third_text)
+    sample_actually_changed = third_changed.get(sample_host) == 1
+    assert_caught_it = task_failed_for_host(
+        third_text, "assert this device's config was not rewritten", sample_host
+    )
+
+    if not (sample_actually_changed and assert_caught_it):
+        return False
+
+    # --- Final clean run, so later TODOs start from a known-good state ---
+    final_result = run_playbook()
+    final_text = final_result.stdout + "\n" + final_result.stderr
+    final_changed = parse_recap_changed(final_text)
+    return all(final_changed.get(host) == 0 for host in expected_devices)
 
 
 def line_containing(text, needle):

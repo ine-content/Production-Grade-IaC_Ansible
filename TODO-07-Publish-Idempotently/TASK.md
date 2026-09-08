@@ -54,6 +54,14 @@ This TODO doesn't add a new mechanism. It makes an existing guarantee visible an
          fail_msg: <...>
          success_msg: <...>
 
+   This task looking identical to TODO 05's is the point, not an
+   oversight - idempotency means running the same declarative action
+   again and getting nothing to happen. Name its result
+   republish_result (not something generic) so it's clear at a glance
+   which result is which. Keep the assert task's name exactly "assert
+   this device's config was not rewritten" - the grader identifies its
+   pass/fail result by that name, not by fail_msg/success_msg wording.
+
 3. Fill in each <...> - the template task is a straight copy of
    TODO 05's:
 
@@ -67,28 +75,14 @@ This TODO doesn't add a new mechanism. It makes an existing guarantee visible an
 
      assert that:     - not republish_result.changed
 
-4. This task looking identical to TODO 05's is the point, not an
-   oversight - idempotency is a property of running the SAME
-   declarative action again and getting nothing to happen. If it
-   looked different from TODO 05's, it wouldn't actually be testing
-   whether the same operation is safe to repeat.
+   republish_result.changed is false when Ansible compared the content
+   it was about to write against what's already at dest and found them
+   identical. If your assert fails, the likely cause isn't the assert -
+   it's a small mismatch between this task's src/dest/vars and TODO
+   05's, causing Ansible to render something slightly different from
+   what's already on disk.
 
-5. Name this task's result republish_result rather than something
-   generic - TODO 05's own render task doesn't register anything, so
-   there's no existing name to collide with, but a descriptive name
-   makes it clear at a glance which result is which (one is the first
-   write, one is the proof-of-no-change).
-
-6. republish_result.changed is false when Ansible compared the
-   content it was about to write against what's already at dest and
-   found them identical - true means it actually rewrote the file. If
-   your assert fails here, the most likely cause isn't your assert -
-   it's a small difference between this task's src/dest/vars and
-   TODO 05's (a typo in dest, a different platform_templates key,
-   wrong vars: names), causing Ansible to render something that
-   doesn't quite match what's already on disk.
-
-7. Save, then run: python grading.py
+4. Save, then run: python grading.py
    (Running ./run_playbook.sh directly first, before writing anything,
    fails the same way - the guard assert stops every device with
    "TODO 07 not complete: ...", failed=1 in the PLAY RECAP.)
@@ -132,6 +126,6 @@ Run 2 (immediately after): every device showed exactly 0 changed tasks.
 Publishing is proven idempotent - a second run of the whole pipeline makes zero changes on any device.
 ```
 
-The grader runs the whole playbook twice in a row, with nothing else changed in between, and reads Ansible's own per-host `changed` counter straight out of the `PLAY RECAP` - not just text you printed. The first run (from a cleared `output/`) must show exactly one changed task per device (TODO 05's first-ever write). The second run must show exactly zero — real proof the entire pipeline, this TODO's re-render included, is a genuine no-op the second time, not something that can be gamed by hardcoding a success message.
+The grader tests this three ways. First, it runs the whole playbook twice in a row, with nothing else changed in between, and reads Ansible's own per-host `changed` counter straight out of the `PLAY RECAP` - not just text you printed. The first run (from a cleared `output/`) must show exactly one changed task per device (TODO 05's first-ever write). The second run must show exactly zero. Third, it deliberately corrupts one device's already-rendered output and re-checks just that device: your assert must genuinely fail here, `changed` must flip to `true` - proof your `that:` condition is really checking `republish_result.changed` and isn't a no-op that always reports success.
 
 ---

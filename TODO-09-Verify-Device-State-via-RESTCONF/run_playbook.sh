@@ -60,6 +60,17 @@ python3 mock_device_server.py >> logs/mock_device_server.log 2>&1 &
 MOCK_PID=$!
 sleep 1.5   # every device server binds synchronously at startup
 
+if ! kill -0 "$MOCK_PID" 2>/dev/null; then
+    echo "ERROR: mock_device_server.py failed to start - see logs/mock_device_server.log" >&2
+    if grep -q "Can't assign requested address" logs/mock_device_server.log 2>/dev/null; then
+        echo "" >&2
+        echo "This looks like the macOS loopback aliases haven't been set up yet." >&2
+        echo "Run this once (needs sudo, and again after every reboot), then try again:" >&2
+        echo "  sudo ./setup_local_loopback.sh" >&2
+    fi
+    exit 1
+fi
+
 cleanup() {
     kill "$MOCK_PID" 2>/dev/null || true
     wait "$MOCK_PID" 2>/dev/null || true
