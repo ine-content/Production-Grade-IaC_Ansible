@@ -157,7 +157,7 @@ HINTS = {
     5: "Use the template module with src: chosen by render_context.platform (cat8k -> cat8k_ospf.j2, nexus9k -> nexus_vlan.j2) and dest: output/<device_id>.cfg. The templates expect plain hostname and vlans variables, not render_context.hostname/render_context.vlans - use this task's own vars: to expose them under those exact names.",
     6: "Write two assert tasks. First: lookup('file', ...output.../<device_id>.cfg) equals lookup('file', ...golden.../<device_id>.cfg). Second: loop over disabled_vlan_markers (already computed for you in inventory/devices.py) and assert item not in <that same rendered text> for each one - the Jinja 'in' test does substring containment when the right side is a string, so this finds any disabled VLAN marker that leaked into the rendered text, independently of golden - register: policy_check_result on this second task only (if it runs at all, the first one already passed).",
     7: "Copy TODO 05's template task exactly (same src, dest, vars), register: it under a descriptive name (e.g. republish_result - TODO 05's own task doesn't register anything at all, so there's nothing to collide with), then assert not republish_result.changed. ansible.builtin.template already checksums content before writing, so a correct re-render of identical content reports changed: false with no extra code from you.",
-    8: "Use the uri module, gated behind when: auto_deploy so only staging devices ever run it: method: PATCH to \"http://{{ ansible_host }}:{{ restconf_port }}{{ restconf_path }}\", body_format: json with body: {config: <the rendered file's contents via lookup('file', ...)>}, url_username/url_password from lookup('env', 'RESTCONF_' ~ environment_name | upper ~ '_USERNAME'/'_PASSWORD'), force_basic_auth: true. group_vars/staging.yml already sets auto_deploy: true; group_vars/prod.yml already sets it false. Then widen status_code: to include both success and every status you want to inspect instead of crash on (e.g. [200, 204, 401, 403, 422, 500, 502, 503, 504]), add failed_when: false as a task-level keyword (a sibling of register:, not a module parameter), register: push_result, then add until: push_result.status | default(0) in [200, 204, 401, 403, 422], retries: 3, delay: 2. default(0) matters: a connection that fails outright never gets a real HTTP response, so push_result has no .status key at all that run.",
+    8: "Use the uri module, gated with when: auto_deploy. PATCH to \"http://{{ ansible_host }}:{{ restconf_port }}{{ restconf_path }}\", body_format: json, body: {config: <rendered file via lookup('file', ...)>}. Auth via url_username/url_password from lookup('env', 'RESTCONF_' ~ environment_name | upper ~ '_USERNAME'/'_PASSWORD'), force_basic_auth: true. Widen status_code: to cover every status you want to inspect, not just success. Add failed_when: false as a task-level keyword (sibling of register:, not a module param), register: push_result, then retry with until: push_result.status | default(0) in [...], retries: 3, delay: 2 - default(0) matters because a connection that fails outright leaves push_result with no .status key at all.",
 }
 
 SOLUTIONS = {
@@ -275,7 +275,7 @@ EXPECTED = {
     5: "output/<device_id>.cfg should exist and match golden/<site_id>/<device_id>.cfg exactly for all 9 devices - the right template for each device's platform, with the right hostname and vlans substituted in.",
     6: "Every device should report both checks passing on a clean run. Corrupting one device's golden reference should fail only that device. Injecting a disabled VLAN marker into a staging device's golden file AND its own rendered output (identical bytes) should still fail that device, proving the second check works independently of the first.",
     7: "Running the playbook from a clean output/ should report exactly one changed task per device (the first render). Running it again immediately after, with nothing else changed, should report exactly zero changed tasks per device - proof the whole pipeline, TODO 07's re-render included, is a genuine no-op.",
-    8: "A GET sent independently to each device's own RESTCONF endpoint, with the same credentials, should show the 2 staging devices (auto_deploy: true) holding the exact content of their own output/<device_id>.cfg, and the 7 production devices (auto_deploy: false) holding nothing at all. Under fault injection, a device hit with a transient 503 should end up pushed correctly after exactly 3 attempts (2 failures + 1 success); a device hit with a permanent 422 should never be pushed and should show exactly 1 attempt (never retried).",
+    8: "A GET to each device's own RESTCONF endpoint should show the 2 staging devices holding the exact content of their own output/<device_id>.cfg, and the 7 production devices holding nothing at all. Under fault injection: a device hit with a transient 503 should end up pushed after exactly 3 attempts (2 failures + 1 success); a device hit with a permanent 422 should never be pushed and should show exactly 1 attempt.",
 }
 
 PROBLEMS = {
@@ -286,7 +286,7 @@ PROBLEMS = {
     5: "No config was rendered for one or more devices, the wrong template was used for a device's platform, or the rendered content doesn't match golden.",
     6: "Post-render verification is missing, doesn't run for every device, or the disabled-VLAN check trusts golden/output content instead of independently re-deriving from disabled_vlan_markers.",
     7: "The idempotent re-render task is missing, points at the wrong file, or the assert doesn't actually check republish_result.changed - so a second run of the pipeline still shows changes.",
-    8: "Either a staging device didn't get pushed correctly, a production device got pushed to when it should have been held for approval instead, a transient failure wasn't retried the right number of times, or a permanent failure was retried when it shouldn't have been.",
+    8: "A staging device wasn't pushed correctly, a production device got pushed when it should have been held for approval, or a transient/permanent failure wasn't retried the right number of times.",
 }
 
 STAGING_DEVICES = {"sea03-cat8k-01", "sea03-n9k-01"}
@@ -516,7 +516,7 @@ def get_device_config(device_id, expected):
     try:
         response = requests.get(url, auth=(username, password), timeout=5)
     except requests.RequestException as exc:
-        return None, f"GET {url} failed: {exc}"
+        return None, f"GET {url} failed ({type(exc).__name__}) - is the mock device fleet running?"
     if response.status_code != 200:
         snippet = response.text[:200].replace("\n", " ")
         return None, f"GET {url} returned HTTP {response.status_code} (expected 200): {snippet!r}"
@@ -571,17 +571,13 @@ def check_push_clean_state():
             # this check pass a correct solution rather than the file's
             # exact byte count.
             if (config or "").rstrip("\n") != expected_config.rstrip("\n"):
-                diagnostics[device_id] = (
-                    f"{device_id} is a staging device (auto_deploy: true) and should have been "
-                    f"pushed, but its stored config does not match output/{device_id}.cfg."
-                )
+                if not config:
+                    diagnostics[device_id] = "should have been pushed, but holds no config at all - nothing was ever pushed."
+                else:
+                    diagnostics[device_id] = f"was pushed, but its stored config does not match output/{device_id}.cfg."
         else:
             if config not in (None, ""):
-                diagnostics[device_id] = (
-                    f"{device_id} is a production device (auto_deploy: false) and must NOT be "
-                    f"pushed to without approval, but it already holds a config - the push task "
-                    f"is missing (or has the wrong) when: auto_deploy condition."
-                )
+                diagnostics[device_id] = "must not be pushed without approval, but already holds a config - when: auto_deploy is missing or wrong."
 
     return (len(diagnostics) == 0), diagnostics
 
@@ -660,30 +656,18 @@ def check_todo_8():
         else:
             expected_config = (OUTPUT_DIR / f"{transient_device}.cfg").read_text(encoding="utf-8")
             if (config or "").rstrip("\n") != expected_config.rstrip("\n"):
-                diagnostics[transient_device] = (
-                    f"{transient_device} should have succeeded after retrying a transient "
-                    f"503, but its stored config does not match output/{transient_device}.cfg."
-                )
+                diagnostics[transient_device] = f"should have succeeded after retrying a transient 503, but its stored config does not match output/{transient_device}.cfg."
             elif transient_attempts != 3:
-                diagnostics[transient_device] = (
-                    f"{transient_device} was hit {transient_attempts} time(s) during the retry test - "
-                    f"expected exactly 3 (2 retried transient failures + 1 success)."
-                )
+                diagnostics[transient_device] = f"was hit {transient_attempts} time(s) during the retry test - expected exactly 3 (2 retried failures + 1 success)."
 
         config, error = get_device_config(permanent_device, expected_devices[permanent_device])
         if error:
             diagnostics[permanent_device] = error
         else:
             if config not in (None, ""):
-                diagnostics[permanent_device] = (
-                    f"{permanent_device} should never have been pushed (a permanent 422 "
-                    f"error), but it already holds a config."
-                )
+                diagnostics[permanent_device] = "should never have been pushed (a permanent 422 error), but already holds a config."
             elif permanent_attempts != 1:
-                diagnostics[permanent_device] = (
-                    f"{permanent_device} was hit {permanent_attempts} time(s) during the retry test - "
-                    f"expected exactly 1 (a permanent error should never be retried)."
-                )
+                diagnostics[permanent_device] = f"was hit {permanent_attempts} time(s) during the retry test - expected exactly 1 (a permanent error should never be retried)."
     finally:
         if FAULT_FILE.exists():
             FAULT_FILE.unlink()
@@ -1392,8 +1376,11 @@ def feedback(failed, context=None):
     if failed == 8:
         diagnostics = (context or {}).get("todo_8_diagnostics") or {}
         if diagnostics:
-            detail_lines = "\n".join(f"  {host}: {reason}" for host, reason in sorted(diagnostics.items()))
-            problem_text = f"{problem_text}\n\nWhat actually happened, per device:\n{detail_lines}"
+            by_reason = {}
+            for host, reason in sorted(diagnostics.items()):
+                by_reason.setdefault(reason, []).append(host)
+            detail_lines = "\n".join(f"  {', '.join(hosts)}: {reason}" for reason, hosts in by_reason.items())
+            problem_text = f"{problem_text}\n\nPer device:\n{detail_lines}"
 
     section("Problem", problem_text, YELLOW)
     section("Expected", EXPECTED[failed], CYAN)

@@ -1,5 +1,0 @@
-[
-  { "device_id": "aus02-cat8k-01", "site_id": "aus02", "platform": "cat8k",   "hostname": "MER-AUS02-CAT8K-01", "ip_address": "127.50.21.10", "restconf_port": 8543 },
-  { "device_id": "aus02-n9k-01",   "site_id": "aus02", "platform": "nexus9k", "hostname": "MER-AUS02-N9K-01",   "ip_address": "127.50.21.20", "restconf_port": 8543 },
-  { "device_id": "aus02-n9k-02",   "site_id": "aus02", "platform": "nexus9k", "hostname": "MER-AUS02-N9K-02",   "ip_address": "127.50.21.21", "restconf_port": 8543 }
-]

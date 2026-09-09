@@ -106,43 +106,42 @@ But a real device doesn't only ever return 204. IT leadership's complaint: "Some
      retries         - 3
      delay           - 2
 
-4. why when: auto_deploy matters here specifically: a task that's
-   skipped (when: is false) is Ansible's way of saying "this genuinely
-   never ran" - nothing was sent, nothing to roll back. That's exactly
-   the property you want for production: not "the push failed safely,"
-   but "the push never happened at all until someone approves it."
-   Leaving when: off this task would push to all 9 devices, prod
-   included, the moment this TODO runs.
+Note: why each of these matters -
 
-5. why force_basic_auth and status_code matter: without
-   force_basic_auth: true, uri only sends credentials after a server
-   first replies with a 401 challenge - an extra round trip this mock
-   doesn't bother with, so the first request would come back
-   unauthenticated. uri's default behavior treats any status outside
-   200-299 as an immediate, fatal task failure - that default would
-   defeat until: before it ever gets a chance to retry. Listing every
-   status you care about in status_code:, combined with
-   failed_when: false, turns a non-2xx response into ordinary data
-   (push_result.status) to make a retry decision about, instead of a
-   crash.
+   when: a task that's skipped (when: is false) is Ansible's way of
+   saying "this genuinely never ran" - nothing was sent, nothing to
+   roll back. That's exactly the property you want for production:
+   not "the push failed safely," but "the push never happened at all
+   until someone approves it." Leaving when: off this task would push
+   to all 9 devices, prod included, the moment this TODO runs.
 
-6. why until: stops retrying on 401/403/422: until: keeps a task going
-   only while its condition is FALSE. Listing 401, 403, 422 alongside
-   the success codes 200, 204 means a permanent error already
-   satisfies the condition on the very first attempt, so it's never
-   retried at all. Anything else (500, 503, ...) leaves the condition
-   false, so Ansible tries again, up to retries more times, waiting
-   delay seconds in between.
+   force_basic_auth and status_code: without force_basic_auth: true,
+   uri only sends credentials after a server first replies with a 401
+   challenge - an extra round trip this mock doesn't bother with, so
+   the first request would come back unauthenticated. uri's default
+   behavior treats any status outside 200-299 as an immediate, fatal
+   task failure - that default would defeat until: before it ever
+   gets a chance to retry. Listing every status you care about in
+   status_code:, combined with failed_when: false, turns a non-2xx
+   response into ordinary data (push_result.status) to make a retry
+   decision about, instead of a crash.
 
-7. why default(0) matters: a connection that fails outright - refused,
-   timed out, DNS failure - never gets a real HTTP response at all, so
+   until: keeps a task going only while its condition is FALSE.
+   Listing 401, 403, 422 alongside the success codes 200, 204 means a
+   permanent error already satisfies the condition on the very first
+   attempt, so it's never retried at all. Anything else (500, 503,
+   ...) leaves the condition false, so Ansible tries again, up to
+   retries more times, waiting delay seconds in between.
+
+   default(0): a connection that fails outright - refused, timed out,
+   DNS failure - never gets a real HTTP response at all, so
    push_result has no .status key that attempt. Referencing
    push_result.status directly would then be a hard templating error
    instead of a retry. default(0) gives Jinja a safe fallback (an int
    not in either list) so a totally failed connection attempt is
    correctly treated as "keep retrying."
 
-8. register: push_result doesn't affect whether this task succeeds -
+   register: push_result doesn't affect whether this task succeeds -
    it exists so the guard and report tasks after it can read
    push_result.status for the staging devices that actually ran the
    task. 'RESTCONF_' ~ environment_name | upper ~ '_USERNAME' is Jinja
@@ -150,7 +149,7 @@ But a real device doesn't only ever return 204. IT leadership's complaint: "Some
    mock_device_server.py checks against - for a staging device that's
    RESTCONF_STAGING_USERNAME.
 
-9. Save, then run: python grading.py
+4. Save, then run: python grading.py
    (Running ./run_playbook.sh directly first, before writing anything,
    the 2 staging devices fail on the guard task with "TODO 08 not
    complete: ..." - an unambiguous message, distinct from what the
