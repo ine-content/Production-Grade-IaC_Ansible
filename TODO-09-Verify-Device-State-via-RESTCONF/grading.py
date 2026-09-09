@@ -720,6 +720,9 @@ def check_todo_8():
     return check_push_clean_state()
 
 
+VERIFY_TASK_NAME = "assert the device's live state matches what was pushed"
+
+
 def check_todo_9():
     """Injects a "lying" fault into one staging device (see
     mock_device_server.py's do_PATCH) - it accepts every PATCH with a
@@ -730,9 +733,15 @@ def check_todo_9():
     stdout/stderr directly to confirm the *pipeline itself* caught the
     lie. That's the actual point of TODO 09: verification has to be a
     task inside the playbook, not something only this grader checks
-    from outside afterward. The lying device's own "assert the device's
-    live state matches what was pushed" task must fail; the other
-    (truthful) staging device must still report success normally.
+    from outside afterward.
+
+    Content-based, same reasoning as the TODO 06/07 fixes - never
+    trust the student's own fail_msg/success_msg text (TASK.md leaves
+    that wording entirely up to them). Instead this uses task_block/
+    task_passed_for_host/task_failed_for_host, scoped to the fixed
+    task name VERIFY_TASK_NAME, to determine per-host pass/fail
+    independent of any wording: the lying device's own assert task
+    must fail; the truthful staging device's must pass.
 
     Always removes the fault file afterward, then runs one final clean
     pass with nothing faked and reuses check_todo_8's own external
@@ -750,22 +759,11 @@ def check_todo_9():
         result = run_playbook()
         text = result.stdout + "\n" + result.stderr
 
-        truthful_line = f"{truthful_device}'s live device state matches what was pushed."
-        if truthful_line not in text:
-            diagnostics[truthful_device] = (
-                f"{truthful_device} was told the truth by the mock device, but the "
-                f"pipeline did not report its live state as verified - is the "
-                f"verification task actually running for every device that was pushed to?"
-            )
+        if not task_passed_for_host(text, VERIFY_TASK_NAME, truthful_device):
+            diagnostics[truthful_device] = "device state could not be verified."
 
-        lying_fail_marker = f"{lying_device}'s live device state does not match what was pushed"
-        if lying_fail_marker not in text:
-            diagnostics[lying_device] = (
-                f"{lying_device}'s mock device accepted the push (HTTP 204) without "
-                f"actually storing it, but the pipeline did not catch this - the "
-                f"verification task is either missing, or trusts push_result.status "
-                f"instead of independently reading the device's live state back."
-            )
+        if not task_failed_for_host(text, VERIFY_TASK_NAME, lying_device):
+            diagnostics[lying_device] = "device state could not be verified."
     finally:
         if FAULT_FILE.exists():
             FAULT_FILE.unlink()
@@ -1430,8 +1428,11 @@ def print_todo_details(number, statuses, context):
             console.print("Fault injection: a transient 503 was retried until it succeeded (3 attempts); a permanent 422 failed immediately and was never retried (1 attempt).")
         else:
             diagnostics = context.get("todo_8_diagnostics") or {}
-            for host in sorted(diagnostics.keys()):
-                console.print(f"  {host} -> {diagnostics[host]}")
+            by_reason = {}
+            for host, reason in sorted(diagnostics.items()):
+                by_reason.setdefault(reason, []).append(host)
+            for reason, hosts in by_reason.items():
+                console.print(f"  {', '.join(hosts)} -> {reason}")
 
     elif number == 9:
         console.print("[9] Verifying device state via RESTCONF...")
@@ -1441,8 +1442,11 @@ def print_todo_details(number, statuses, context):
             console.print("With no lie injected, both staging devices push and verify correctly.")
         else:
             diagnostics = context.get("todo_9_diagnostics") or {}
-            for host in sorted(diagnostics.keys()):
-                console.print(f"  {host} -> {diagnostics[host]}")
+            by_reason = {}
+            for host, reason in sorted(diagnostics.items()):
+                by_reason.setdefault(reason, []).append(host)
+            for reason, hosts in by_reason.items():
+                console.print(f"  {', '.join(hosts)} -> {reason}")
 
 
 def print_todo_progress(statuses, context):

@@ -50,6 +50,11 @@ This only makes sense for devices that were actually pushed to — the 7 product
          fail_msg: <...>
          success_msg: <...>
 
+   Keep this assert task's name exactly "assert the device's live
+   state matches what was pushed" - the grader identifies its
+   pass/fail result by that name, not by fail_msg/success_msg
+   wording, which is entirely up to you.
+
 3. Fill in each <...>:
 
      when (both tasks) - auto_deploy and (push_result.status | default(0)) in [200, 204]
@@ -66,27 +71,29 @@ This only makes sense for devices that were actually pushed to — the 7 product
      assert that:    - verify_result.json.config
                        == lookup('file', playbook_dir + '/output/' + device_id + '.cfg')
 
-4. Why this has to be a second, separate request: push_result only
+Note: why each of these matters -
+
+   Why this has to be a second, separate request: push_result only
    ever tells you what the device SAID in response to the PATCH. It
    cannot tell you what the device actually did with it afterward -
    only a fresh GET checks the device's actual current state rather
    than its immediate reply. A device that lies about a PATCH would
    still make push_result.status look completely normal.
 
-5. Why the same lookup('file', ...) as the push task: whatever was
+   Why the same lookup('file', ...) as the push task: whatever was
    sent in the PATCH body already went through
    lookup('file', playbook_dir + '/output/' + device_id + '.cfg') in
    TODO 08's task, which strips exactly one trailing newline every
    time it's used. Reading the same file the same way here means both
    sides of this comparison went through that stripping exactly once.
 
-6. return_content: true is what makes the response body available to
+   return_content: true is what makes the response body available to
    read afterward - without it, verify_result.json wouldn't exist.
    verify_result.json.config reaches into the same {"config": "..."}
    shape the mock device always returns from a GET (see
    mock_device_server.py's do_GET if you want to see it directly).
 
-7. Save, then run: python grading.py
+4. Save, then run: python grading.py
 ```
 
 ## Grading Check
@@ -102,6 +109,7 @@ TODO 09 - Verify Device State via RESTCONF
 ────────────────────────────────────────────────────────────────────────────────
 
 [9] Verifying device state via RESTCONF...
+  sea03-cat8k-01, sea03-n9k-01 -> device state could not be verified.
 
 ✗ TODO 09 Not Complete
 

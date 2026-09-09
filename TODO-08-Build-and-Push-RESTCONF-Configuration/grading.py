@@ -1324,8 +1324,11 @@ def print_todo_details(number, statuses, context):
             console.print("Fault injection: a transient 503 was retried until it succeeded (3 attempts); a permanent 422 failed immediately and was never retried (1 attempt).")
         else:
             diagnostics = context.get("todo_8_diagnostics") or {}
-            for host in sorted(diagnostics.keys()):
-                console.print(f"  {host} -> {diagnostics[host]}")
+            by_reason = {}
+            for host, reason in sorted(diagnostics.items()):
+                by_reason.setdefault(reason, []).append(host)
+            for reason, hosts in by_reason.items():
+                console.print(f"  {', '.join(hosts)} -> {reason}")
 
 
 def print_todo_progress(statuses, context):

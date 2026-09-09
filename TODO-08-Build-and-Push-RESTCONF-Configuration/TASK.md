@@ -21,11 +21,11 @@ TODO 01 through TODO 07 are already solved in this folder. Open `site.yml` and f
 
 ## Scenario
 
-Every artifact has been verified twice (TODO 06) and published idempotently (TODO 07), and is sitting in `output/<device_id>.cfg` — but a config file on disk isn't the same as a config actually running on a device. This TODO delivers it over RESTCONF — but not to every device, and not with a single blind attempt.
+Every artifact is verified (TODO 06), published idempotently (TODO 07), and sitting in `output/<device_id>.cfg` - but a file on disk isn't a config running on a device. This TODO pushes it over RESTCONF, to staging only, with retries.
 
-`group_vars/staging.yml` already sets `auto_deploy: true`. `group_vars/prod.yml` already sets it `false`. That flag exists for exactly this moment: a real pipeline must never push to production automatically just because the mechanism to do so works. Production changes wait for an explicit human approval step. Within the scope of this progression, that approval step doesn't exist yet — production simply stays held, indefinitely. A real GitLab pipeline's manual approval gate (a later, separate lab) is what actually releases it, gating this exact same push task. This TODO pushes to the 2 staging devices only, and holds the 7 production devices back untouched.
+`group_vars/staging.yml` sets `auto_deploy: true`; `group_vars/prod.yml` sets it `false`. Production stays held back indefinitely within this progression - a real approval gate (a later, separate lab) is what would release it. This TODO pushes to the 2 staging devices only.
 
-You might expect `ansible.netcommon.restconf_config` here - it's the module built specifically for RESTCONF. It needs an `httpapi` connection plugin, though, and this whole course uses `ansible_connection: local` (see `inventory/devices.py`) - every device here is reached over plain HTTP, with connection details (`ansible_host`, `restconf_port`, `restconf_path`) just sitting in scope as ordinary hostvars, not through a real Ansible connection plugin. `ansible.builtin.uri` is the right tool instead: it ships with `ansible-core` (nothing to install), and RESTCONF, underneath everything else, is just HTTP.
+Use `ansible.builtin.uri`, not `ansible.netcommon.restconf_config` - that module needs an `httpapi` connection plugin, and this course uses `ansible_connection: local` throughout (see `inventory/devices.py`). `uri` ships with `ansible-core`, and RESTCONF is just HTTP underneath.
 
 Each staging device's mock RESTCONF endpoint expects:
 
@@ -37,11 +37,9 @@ Content-Type: application/json
 {"config": "<the exact text in output/<device_id>.cfg>"}
 ```
 
-A clean push returns HTTP 204 with an empty body. Credentials are never hardcoded - `.env.example` names them `RESTCONF_PROD_USERNAME` / `RESTCONF_PROD_PASSWORD` and `RESTCONF_STAGING_USERNAME` / `RESTCONF_STAGING_PASSWORD`; this device's own `environment_name` decides which pair applies.
+A clean push returns HTTP 204. Credentials come from `.env.example`'s `RESTCONF_PROD_USERNAME`/`_PASSWORD` and `RESTCONF_STAGING_USERNAME`/`_PASSWORD` - never hardcoded; this device's own `environment_name` picks the pair.
 
-But a real device doesn't only ever return 204. IT leadership's complaint: "Sometimes a push to a device just fails — a momentary network blip, a device that's briefly overloaded — and right now nothing retries it. We lose a valid deployment over something that would have worked one second later. But a network blip is not the same thing as a bad password: if a push fails because of bad credentials, we want the pipeline to stop immediately and tell us, not waste time retrying something that will never succeed." Ansible already has a built-in retry mechanism for exactly this — `until:`/`retries:`/`delay:` on a task. There's no `while` loop or manual backoff math to write by hand here, unlike a hand-rolled Python pipeline. A task with `until:` keeps re-running until that condition is true, or it runs out of retries, whichever comes first. The real job in this TODO isn't just making the push - it's also deciding what "done" means, and retrying only the failures worth retrying.
-
-`until:`/`retries:`/`delay:` have to live directly on the one task making the attempt - a task's own `until:` already re-runs that exact task, so there's no way to "add retry" as a second task layered after a first, plain push; that would mean pushing twice per device instead of retrying once. This is why there's only one `STUDENT WORK AREA` here: one task does the push and the retry together.
+A push can also fail - a momentary blip should retry; bad credentials should stop immediately, not waste retries on something that will never succeed. `until:`/`retries:`/`delay:` on the task is Ansible's built-in retry loop for exactly this - no hand-rolled backoff needed. Since `until:` re-runs the same task, retry has to live on the one push task itself, not a second task after it - which is why there's only one `STUDENT WORK AREA` here.
 
 ## Steps
 
@@ -108,46 +106,47 @@ But a real device doesn't only ever return 204. IT leadership's complaint: "Some
 
 Note: why each of these matters -
 
-   when: a task that's skipped (when: is false) is Ansible's way of
-   saying "this genuinely never ran" - nothing was sent, nothing to
-   roll back. That's exactly the property you want for production:
-   not "the push failed safely," but "the push never happened at all
-   until someone approves it." Leaving when: off this task would push
-   to all 9 devices, prod included, the moment this TODO runs.
+   when: think of it as a gate. A skipped task is like a delivery
+   truck that never left the warehouse - nothing was sent, nothing to
+   undo. That's what you want for production: not "we tried and it
+   failed safely," but "we didn't try at all until a human said yes."
+   Without this gate, the task would push to all 9 devices, prod
+   included, the moment you save the file.
 
-   force_basic_auth and status_code: without force_basic_auth: true,
-   uri only sends credentials after a server first replies with a 401
-   challenge - an extra round trip this mock doesn't bother with, so
-   the first request would come back unauthenticated. uri's default
-   behavior treats any status outside 200-299 as an immediate, fatal
-   task failure - that default would defeat until: before it ever
-   gets a chance to retry. Listing every status you care about in
-   status_code:, combined with failed_when: false, turns a non-2xx
-   response into ordinary data (push_result.status) to make a retry
-   decision about, instead of a crash.
+   force_basic_auth and status_code - two separate problems: (1)
+   normally uri waits to be challenged with a 401 before sending
+   credentials, but this mock doesn't bother with that handshake - it
+   just rejects you if they weren't there on the first try, so
+   force_basic_auth: true sends them upfront. (2) by default uri
+   treats anything that isn't 2xx as an instant crash, before your
+   retry logic ever gets a turn - listing every status you expect in
+   status_code: (plus failed_when: false) says "don't crash on these,
+   just hand me the result and let me decide."
 
-   until: keeps a task going only while its condition is FALSE.
-   Listing 401, 403, 422 alongside the success codes 200, 204 means a
-   permanent error already satisfies the condition on the very first
-   attempt, so it's never retried at all. Anything else (500, 503,
-   ...) leaves the condition false, so Ansible tries again, up to
-   retries more times, waiting delay seconds in between.
+   until: worded backwards from how you'd guess - it means "keep
+   retrying until this becomes true." List every status that means
+   "we're done": the successes (200, 204) and the errors retrying can
+   never fix (401, 403, 422 - bad password, bad data). Get one of
+   those on attempt 1 and you're already done, so it stops
+   immediately. Anything else (500, 503, a timeout) isn't on that
+   list, so it keeps trying - up to retries times, delay seconds
+   apart.
 
-   default(0): a connection that fails outright - refused, timed out,
-   DNS failure - never gets a real HTTP response at all, so
-   push_result has no .status key that attempt. Referencing
-   push_result.status directly would then be a hard templating error
-   instead of a retry. default(0) gives Jinja a safe fallback (an int
-   not in either list) so a totally failed connection attempt is
-   correctly treated as "keep retrying."
+   default(0): if the connection fails outright (server down,
+   timeout, wrong address), there's no HTTP response at all, so
+   push_result.status doesn't even exist yet. Asking for .status when
+   it's missing would crash the playbook instead of letting your
+   retry logic handle it. default(0) just says "if there's no status,
+   pretend it's 0" - a number that isn't in your success/permanent-
+   error list, so it's treated like any other "try again" case.
 
-   register: push_result doesn't affect whether this task succeeds -
-   it exists so the guard and report tasks after it can read
-   push_result.status for the staging devices that actually ran the
-   task. 'RESTCONF_' ~ environment_name | upper ~ '_USERNAME' is Jinja
-   string concatenation (~) building the exact env var name
-   mock_device_server.py checks against - for a staging device that's
-   RESTCONF_STAGING_USERNAME.
+   register and the credential lookup: register: push_result doesn't
+   affect pass/fail at all - it just saves the result so the tasks
+   after this one can read push_result.status and report what
+   happened. 'RESTCONF_' ~ environment_name | upper ~ '_USERNAME' is
+   just string-gluing - for a staging device it builds the literal
+   text RESTCONF_STAGING_USERNAME, the exact env var name holding
+   that device's password.
 
 4. Save, then run: python grading.py
    (Running ./run_playbook.sh directly first, before writing anything,
@@ -173,6 +172,7 @@ TODO 08 - Build, Push, and Retry RESTCONF Configuration
 ────────────────────────────────────────────────────────────────────────────────
 
 [8] Pushing rendered configuration via RESTCONF, with retry (staging only)...
+  sea03-cat8k-01, sea03-n9k-01: should have been pushed, but holds no config at all - nothing was ever pushed.
 
 ✗ TODO 08 Not Complete
 
@@ -192,8 +192,9 @@ TODO 08 - Build, Push, and Retry RESTCONF Configuration
 [8] Pushing rendered configuration via RESTCONF, with retry (staging only)...
   aus02-cat8k-01 (prod) -> held for approval, GET confirmed nothing was pushed
   ...
-  sea03-cat8k-01 (staging, transient 503 x2) -> retried, pushed on the 3rd attempt
-  sea03-n9k-01 (staging, permanent 422) -> failed immediately, never retried
+  sea03-cat8k-01 (staging) -> pushed, GET confirmed the device now holds it
+  sea03-n9k-01 (staging) -> pushed, GET confirmed the device now holds it
+Fault injection: a transient 503 was retried until it succeeded (3 attempts); a permanent 422 failed immediately and was never retried (1 attempt).
 
 ✓ TODO 08 Complete
 Staging was pushed correctly and production was correctly held back for approval,
