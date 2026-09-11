@@ -861,6 +861,25 @@ def task_passed_for_host(text, task_name, host):
     )
 
 
+def task_changed_for_host(text, task_name, host):
+    """True only if this exact task's own output shows host as changed: -
+    scoped to one task by name, unlike parse_recap_changed's whole-play
+    PLAY RECAP count. check_todo_7 needs this specifically: once a later
+    TODO adds its own task that's unconditionally changed every run (for
+    example TODO 10's ansible.builtin.shell append, which has no
+    changed_when: false and legitimately writes a new line every time),
+    the overall per-host changed count in the PLAY RECAP stops being 0
+    on an idempotent second run even though TODO 05/07's own template
+    tasks are genuinely no-ops - a false failure unrelated to TODO 07 at
+    all. Scoping to one task name by inspecting the lines directly under
+    its own TASK [...] banner sidesteps that entirely."""
+    block = task_block(text, task_name)
+    return any(
+        line.strip().startswith(f"changed: [{host}]")
+        for line in block.splitlines()
+    )
+
+
 GOLDEN_TASK_NAME = "verify rendered artifact against golden reference"
 POLICY_TASK_NAME = "independently verify no disabled vlan leaked into the rendered output"
 
@@ -995,44 +1014,60 @@ def extract_student_task_block(site_text, todo_number):
     return site_text[start_match.end():end_match.start()]
 
 
+RENDER_TASK_NAME = "render the platform-specific configuration"
+REPUBLISH_TASK_NAME = "re-render the platform-specific configuration to confirm publishing is idempotent"
+
+
 def check_todo_7():
     """Runs the whole playbook twice in a row, with nothing else changed
     in between - the actual test of idempotency, not just a content
-    check:
+    check.
 
-    Run 1 (starting from a cleared output/): every device should show
-    exactly one changed task in Ansible's own PLAY RECAP - TODO 05's
-    first-ever render, the only real write that happens anywhere in this
-    playbook.
+    Scoped to TODO 05's render task and TODO 07's re-render task by name
+    (task_changed_for_host), not the PLAY RECAP's overall per-host
+    changed count. An overall count would be a false signal once a later
+    TODO adds a task that's legitimately changed on every run regardless
+    of idempotency - TODO 10's audit-log append, in particular, has no
+    changed_when: false and is supposed to write a new line every single
+    run. Scoping to these two task names by inspecting their own TASK
+    [...] output directly keeps this check honest about what TODO 07
+    itself is actually responsible for.
 
-    Run 2 (immediately after, output/ left untouched): every device
-    should show exactly zero changed tasks - proof the entire pipeline,
-    TODO 07's re-render included, is a genuine no-op the second time.
-    A student who left TODO 07 blank, pointed it at the wrong file, or
-    forgot the assert would still show at least one changed task (or no
-    task at all) here - this can't be gamed by hardcoding a success
-    message, since the changed counts come from Ansible itself, not from
-    anything this grader reads out of debug output.
+    Run 1 (starting from a cleared output/): TODO 05's render must be
+    changed for every device (a genuine first-ever write); TODO 07's
+    re-render must already be a no-op right behind it, since content
+    matches what TODO 05 just wrote moments earlier in the same run.
 
-    Also confirms TODO 07's own success message printed on run 2, so a
-    solution that happens to satisfy the changed-count check some other
-    way (e.g. a no-op task) still has to have actually run the right
+    Run 2 (immediately after, output/ left untouched): both tasks must
+    be no-ops for every device - proof the entire render/re-render pair
+    is a genuine no-op the second time. A student who left TODO 07
+    blank, pointed it at the wrong file, or forgot the assert would
+    still show TODO 07's task as changed (or missing) here - this can't
+    be gamed by hardcoding a success message, since changed: comes from
+    Ansible itself, not from anything this grader reads out of debug
+    output.
+
+    Also confirms TODO 07's own assert task passed on run 2, so a
+    solution that happens to satisfy the changed check some other way
+    (e.g. a no-op task) still has to have actually run the right
     assert."""
     expected_devices = load_expected_devices()
 
     clear_rendered_output()
     first_result = run_playbook()
     first_text = first_result.stdout + "\n" + first_result.stderr
-    first_changed = parse_recap_changed(first_text)
 
-    if any(first_changed.get(host) != 1 for host in expected_devices):
+    if not all(task_changed_for_host(first_text, RENDER_TASK_NAME, host) for host in expected_devices):
+        return False
+    if any(task_changed_for_host(first_text, REPUBLISH_TASK_NAME, host) for host in expected_devices):
         return False
 
     second_result = run_playbook()
     second_text = second_result.stdout + "\n" + second_result.stderr
-    second_changed = parse_recap_changed(second_text)
 
-    if any(second_changed.get(host) != 0 for host in expected_devices):
+    if any(task_changed_for_host(second_text, RENDER_TASK_NAME, host) for host in expected_devices):
+        return False
+    if any(task_changed_for_host(second_text, REPUBLISH_TASK_NAME, host) for host in expected_devices):
         return False
 
     if not all(
@@ -1116,8 +1151,11 @@ def check_todo_7():
     # --- Final clean run, so later TODOs start from a known-good state ---
     final_result = run_playbook()
     final_text = final_result.stdout + "\n" + final_result.stderr
-    final_changed = parse_recap_changed(final_text)
-    return all(final_changed.get(host) == 0 for host in expected_devices)
+    return not any(
+        task_changed_for_host(final_text, RENDER_TASK_NAME, host)
+        or task_changed_for_host(final_text, REPUBLISH_TASK_NAME, host)
+        for host in expected_devices
+    )
 
 
 def line_containing(text, needle):

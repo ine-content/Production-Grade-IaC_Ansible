@@ -18,15 +18,11 @@ TODO 01 through TODO 09 are already solved in this folder. Open `site.yml` and f
 
 This run has authored, loaded, validated, rendered, verified, published, pushed, and verified again (TODO 02 through TODO 09) — but every bit of that so far only exists as scrollback in a terminal that disappears the moment the window closes. Compliance and IT leadership have said: "When someone asks us three weeks from now which devices were actually touched during a given rollout, we can't just say we don't know because the terminal window closed. Every run needs to leave a permanent, structured record of what happened — what was pushed, what was held back, and what was independently verified — that we can search and audit later."
 
-### Why this looks different from Python's version of this same lesson
-
-Python's version of this course runs as one process for the whole fleet, so it builds one dict describing every device's outcome and writes it out once, right at the end. This course's playbook instead runs each device as its own independent host loop iteration — by the time this task runs, this device already knows its own final outcome (`push_result`, `verify_result`, `auto_deploy`), but has no way to see any other device's outcome, and doesn't need to: each device just appends its own one-line JSON record to one shared file, `logs/audit.jsonl`, with no coordination between hosts required.
-
 ### Why this task reaches for `ansible.builtin.shell`
 
-That "no coordination required" claim only holds if the append itself is actually safe to run from several hosts at once — and this playbook does run several devices in parallel, not one at a time. A module like `ansible.builtin.lineinfile` reads the whole file, decides what to add, and rewrites the whole file. Two hosts doing that at the same instant can each read the same starting content, and whichever one writes second silently overwrites the first host's line — a lost update, not an error either host would ever see.
+This playbook runs several devices in parallel, not one at a time — so the append itself has to be safe under real concurrency, not just in theory. A module like `ansible.builtin.lineinfile` reads the whole file, decides what to add, then rewrites the whole file. Two hosts doing that at once can each read the same starting content and each write back a full copy - whichever writes second silently overwrites the first host's line, with no error either side would ever see.
 
-Appending with a shell redirect (`>>`) is different: POSIX guarantees that a single `write()` to a file opened for append is atomic as long as it's smaller than the system's `PIPE_BUF` (4KB on Linux). One line of JSON is always well under that, so every device's line lands intact, in whatever order the writes happen to land in, with nothing lost and nothing interleaved. That's the one and only reason this task uses `ansible.builtin.shell` instead of a normal declarative file module — it's not "shell scripting for its own sake," it's the one primitive here that's actually safe under real concurrency.
+A shell redirect (`>>`) avoids this: POSIX guarantees a single `write()` to a file opened for append is atomic as long as it's under the system's `PIPE_BUF` (4KB on Linux) - one line of JSON always is. Every device's line lands intact, in whatever order they arrive, with nothing lost or interleaved. That's the only reason this task uses `ansible.builtin.shell` instead of a declarative file module - it's the one primitive here that's actually safe under concurrency.
 
 ### The subtlety that will bite you if you don't know about it
 
@@ -87,14 +83,16 @@ The fix: build the dict **and** call `| to_json` inside the very same `{{ ... }}
                   "report the audit record" task and print a success
                   message even though nothing was ever appended.
 
-4. Why | quote: audit_line is a JSON string, completely full of double
+Note: why each of these matters -
+
+   Why | quote: audit_line is a JSON string, completely full of double
    quotes and colons - exactly the characters that would otherwise
    confuse the shell parsing this command. The quote filter (a thin
    wrapper around Python's shlex.quote) wraps the whole string in
    single quotes and escapes anything inside it that needs escaping,
    so it survives the trip through the shell as one literal argument.
 
-5. push_result is already register:-ed by TODO 08's task for every
+   push_result is already register:-ed by TODO 08's task for every
    device, whether or not auto_deploy was true for it - a production
    device just has a push_result describing a SKIPPED task instead of
    a real HTTP response, which is why push_result.status | default(0)
@@ -104,7 +102,7 @@ The fix: build the dict **and** call `| to_json` inside the very same `{{ ... }}
    key: value YAML-style colons-without-quotes, since this is Jinja,
    not YAML, once you're inside the {{ }}.
 
-6. Save, then run: python grading.py
+4. Save, then run: python grading.py
 ```
 
 ## Grading Check
